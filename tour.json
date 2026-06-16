@@ -1,0 +1,73 @@
+{
+    "version": 1,
+    "tour": [
+        {
+            "id": "welcome",
+            "title": "Welcome to Split Screen",
+            "content": "Play one song through multiple views at once — different arrangements, lyrics, jumping tab, or a 3D Highway in one panel and the default 2D in another. Pop a panel into a second monitor if you have one.",
+            "shape": "bubble",
+            "position": "auto"
+        },
+        {
+            "id": "split-btn",
+            "selector": "#btn-splitscreen",
+            "title": "The Split button",
+            "content": "This toggles the split view. Click it now to see the panels.",
+            "shape": "spotlight",
+            "position": "top",
+            "advance": "click-target"
+        },
+        {
+            "id": "layout-picker",
+            "selector": "#splitscreen-layout-btn",
+            "title": "Pick a layout",
+            "content": "Top/bottom, left/right, or quad (four panels). Switch any time — your per-panel preferences carry over.",
+            "shape": "spotlight",
+            "position": "top"
+        },
+        {
+            "id": "panel",
+            "selector": ".splitscreen-panel",
+            "title": "A panel",
+            "content": "Each panel runs its own highway with its own WebSocket. The mini bar at the bottom controls just this panel — arrangement, viz, Invert, Lefty, Lyrics, Tab, Detect, audio channel, and pop-out.",
+            "shape": "spotlight",
+            "position": "auto"
+        },
+        {
+            "id": "modes",
+            "title": "Panel modes",
+            "content": "The arrangement dropdown in each panel's bar also picks a *mode*: any chart arrangement (Lead, Rhythm, Bass…), Lyrics, Jumping Tab, or a viz plugin you have installed (e.g. 3D Highway). Modes are mutually exclusive per panel.",
+            "shape": "bubble",
+            "position": "auto"
+        },
+        {
+            "id": "viz-settings",
+            "title": "Per-panel viz settings",
+            "content": "When a panel is running a viz that exposes per-panel controls (e.g. 3D Highway: palette, camera smoothing), a \"3D ⚙\" button appears in that panel's bar. Tweaks scope to that panel only — your global viz settings stay untouched.",
+            "shape": "bubble",
+            "position": "auto"
+        },
+        {
+            "id": "hide-bar",
+            "selector": "#btn-splitscreen-hide-bar",
+            "title": "Reclaim screen space",
+            "content": "Collapse the global controls bar to give the panels the full window height. A floating ▴ Controls pill brings it back. Each panel's own mini bar also has a ▾ Bar toggle in its bottom-right corner.",
+            "shape": "spotlight",
+            "position": "top"
+        },
+        {
+            "id": "pop-out",
+            "title": "Multi-monitor pop-out",
+            "content": "Click ⇱ Pop in a panel's bar to detach it into its own window — great for a second monitor. The popup stays in sync with the main player's playhead via BroadcastChannel. Click ⇲ Dock in the popup (or just close it) to bring the panel back.",
+            "shape": "bubble",
+            "position": "auto"
+        },
+        {
+            "id": "outro",
+            "title": "That's the tour",
+            "content": "Defaults live in Settings → Split Screen: default layout, auto-reactivate split after page reloads, or always-on split. Restart this tour any time with the ? button next to Split.",
+            "shape": "bubble",
+            "position": "auto"
+        }
+    ]
+}

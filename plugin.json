@@ -1,0 +1,9 @@
+{
+  "id": "splitscreen",
+  "name": "Split Screen",
+  "version": "1.10.6",
+  "private": false,
+  "settings": { "html": "settings.html" },
+  "script": "screen.js",
+  "tour": "tour.json"
+}
