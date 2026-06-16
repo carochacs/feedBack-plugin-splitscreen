@@ -35,7 +35,7 @@ docker compose restart
 3. Use each panel's dropdown to pick which arrangement it shows. Click **Invert** on a panel to flip just that one.
 4. Click **Split** again to return to the single-highway view.
 
-Split screen works with both PSARC and `.sloppak` songs — any song with more than one arrangement benefits.
+Split screen works with any song that has more than one arrangement.
 
 ### Hiding controls for more screen space
 
@@ -264,7 +264,6 @@ Messages arrive in the order listed above. Do not start rendering until you rece
 ## Other Plugins
 
 - [Stems](https://github.com/topkoa/slopsmith-plugin-stems) — live multi-stem mixer for `.sloppak` songs
-- [Sloppak Converter](https://github.com/topkoa/slopsmith-plugin-sloppak-converter) — convert PSARCs into `.sloppak` files in-app
 
 ## License
 
