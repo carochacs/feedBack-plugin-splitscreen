@@ -1,6 +1,6 @@
 # Slopsmith Plugin: Split Screen
 
-A plugin for [Slopsmith](https://github.com/byrongamatos/slopsmith) that shows 2–4 highway panels side-by-side during playback, each rendering a different arrangement of the same song. Practice lead and rhythm at once, watch bass against lead, or run a quad view of every arrangement a song has.
+A plugin for [Slopsmith](https://github.com/got-feedback/feedback) that shows 2–4 highway panels side-by-side during playback, each rendering a different arrangement of the same song. Practice lead and rhythm at once, watch bass against lead, or run a quad view of every arrangement a song has.
 
 ## Features
 
@@ -8,7 +8,7 @@ A plugin for [Slopsmith](https://github.com/byrongamatos/slopsmith) that shows 2
 - **Per-panel arrangement selector** — each panel has its own dropdown; swap what it renders mid-playback without restarting the song
 - **Per-panel visualization picker** — each panel can independently run any installed `slopsmithViz` plugin (e.g. the 3D highway) alongside the default 2D highway
 - **Per-panel invert toggle** — flip individual panels between player and audience perspective independently
-- **Per-panel note detection** — each panel can independently detect notes from a specific audio input channel; pairs with the [Note Detect](https://github.com/byrongamatos/slopsmith-plugin-notedetect) plugin for multi-guitar setups
+- **Per-panel note detection** — each panel can independently detect notes from a specific audio input channel; pairs with the [Note Detect](https://github.com/got-feedback/feedback-plugin-notedetect) plugin for multi-guitar setups
 - **Pop a panel into its own window** — click **⇱ Pop** on any panel to open it in a new browser window; drag it to a second monitor and resize it freely. The popup is muted and paused (it doesn't even decode the audio) and slaved to the main window's audio time, so there's still only one sound source. Click **⇲ Dock** to send the panel back to its splitscreen slot; just closing the popup window instead removes that panel.
 - **Split a popped window internally** — every popup gets its own bottom toolbar with a layout picker (Single / Top-Bottom / Left-Right / Quad). A popped window can mirror the same layouts as the main splitter, so you can run e.g. a quad on a second monitor with all four arrangements while the main window stays single-panel.
 - **Hide/show bottom controls bar** — click **▾ Bar** (next to Close) to collapse the global player controls and reclaim the vertical space; a floating **▴ Controls** pill restores them
@@ -71,7 +71,7 @@ Open **Settings → Split Screen** to pick the default layout (Top/Bottom, Left/
 
 ## Note Detection
 
-Each panel can independently detect the notes you're playing and score your accuracy in real time. This requires the [Note Detect plugin](https://github.com/byrongamatos/slopsmith-plugin-notedetect) to be installed.
+Each panel can independently detect the notes you're playing and score your accuracy in real time. This requires the [Note Detect plugin](https://github.com/got-feedback/feedback-plugin-notedetect) to be installed.
 
 ### Single input
 
@@ -138,7 +138,7 @@ window.slopsmithViz_my_viz = function () {
 
 Split screen automatically populates each panel's dropdown with this option and calls `panel.hw.setRenderer(factory())` when selected. **No changes to split screen's code are needed.** Each panel gets an independent renderer instance; the highway provides note data, timing, and the RAF loop.
 
-See the [CLAUDE.md plugin guide](https://github.com/byrongamatos/slopsmith/blob/main/CLAUDE.md) for the full `setRenderer` lifecycle and bundle shape. The [3D Highway plugin](https://github.com/byrongamatos/slopsmith-plugin-3dhighway) is a reference implementation.
+See the [CLAUDE.md plugin guide](https://github.com/got-feedback/feedback/blob/main/CLAUDE.md) for the full `setRenderer` lifecycle and bundle shape. The [3D Highway plugin](https://github.com/got-feedback/feedback-plugin-3dhighway) is a reference implementation.
 
 ### Path 2: Pane plugins (own canvas + own WebSocket)
 
