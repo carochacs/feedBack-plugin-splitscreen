@@ -341,6 +341,6 @@ Follow the lyrics/jumping-tab pattern:
 ## Git and PR conventions
 
 - All work goes on feature branches off `main` in this repo (`topkoa/slopsmith-plugin-splitscreen`)
-- PRs target `topkoa/slopsmith-plugin-splitscreen` — NOT `got-feedback/feedback-plugin-splitscreen` (the upstream)
+- PRs target `topkoa/slopsmith-plugin-splitscreen` — NOT `got-feedback/feedBack-plugin-splitscreen` (the upstream)
 - Use `gh pr create --repo topkoa/slopsmith-plugin-splitscreen --base main --head topkoa:<branch>` from inside the plugin directory
 - Do not base feature branches on `upstream/main` — the fork and upstream can diverge; always branch from `origin/main`
