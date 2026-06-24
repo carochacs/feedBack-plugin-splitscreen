@@ -1885,7 +1885,7 @@
             // Connect WebSocket. Pass an empty onSongInfo so core skips its
             // default writes to shared HUD / audio / arrangement dropdown
             // — otherwise every panel's song_info clobbers the main view.
-            // See got-feedback/feedback#27.
+            // See got-feedback/feedBack#27.
             hookPanelReady(panel);
             panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
         }
