@@ -216,6 +216,22 @@
         return -1;
     }
 
+    // Viz factory globals were renamed `window.slopsmithViz_<id>` ->
+    // `window.feedBackViz_<id>` in the feedBack rename (core's main-player picker
+    // and highway_3d register under the new name; core keeps the legacy name as a
+    // compat shim for third-party viz). Resolve BOTH so the per-panel picker finds
+    // a viz whether it registered under the new or the legacy global — otherwise a
+    // migrated viz (e.g. highway_3d) never shows up here.
+    const VIZ_FACTORY_PREFIXES = ['feedBackViz_', 'slopsmithViz_'];
+    function vizFactory(id) {
+        for (let i = 0; i < VIZ_FACTORY_PREFIXES.length; i++) {
+            const f = window[VIZ_FACTORY_PREFIXES[i] + id];
+            if (typeof f === 'function') return f;
+        }
+        return undefined;
+    }
+    function hasVizFactory(id) { return typeof vizFactory(id) === 'function'; }
+
     let _vizPluginsFetchFailed = false;
     async function fetchVizPlugins() {
         try {
@@ -237,9 +253,19 @@
         }
     }
     function _rescanVizPluginsFromWindow() {
-        vizPlugins = Object.keys(window)
-            .filter(k => k.startsWith('slopsmithViz_') && typeof window[k] === 'function')
-            .map(k => ({ id: k.slice('slopsmithViz_'.length), name: k.slice('slopsmithViz_'.length) }));
+        const seen = new Set();
+        const found = [];
+        Object.keys(window).forEach(k => {
+            for (let i = 0; i < VIZ_FACTORY_PREFIXES.length; i++) {
+                const pfx = VIZ_FACTORY_PREFIXES[i];
+                if (k.startsWith(pfx) && typeof window[k] === 'function') {
+                    const id = k.slice(pfx.length);
+                    if (!seen.has(id)) { seen.add(id); found.push({ id, name: id }); }
+                    break;
+                }
+            }
+        });
+        vizPlugins = found;
     }
 
     // Bounded poll for viz factories that register AFTER the picker is
@@ -265,7 +291,7 @@
         // Seed with factories already present so the first tick only fires
         // on factories that appear AFTER we start watching.
         vizPlugins.forEach(vp => {
-            if (typeof window['slopsmithViz_' + vp.id] === 'function') {
+            if (hasVizFactory(vp.id)) {
                 _seenVizFactoryIds.add(vp.id);
             }
         });
@@ -276,8 +302,7 @@
             ticks++;
             let added = false;
             vizPlugins.forEach(vp => {
-                if (!_seenVizFactoryIds.has(vp.id) &&
-                    typeof window['slopsmithViz_' + vp.id] === 'function') {
+                if (!_seenVizFactoryIds.has(vp.id) && hasVizFactory(vp.id)) {
                     _seenVizFactoryIds.add(vp.id);
                     added = true;
                 }
@@ -292,9 +317,7 @@
                     if (p && p.select) populateSelect(p, p.arrIndex || 0);
                 });
             }
-            const allPresent = vizPlugins.every(vp =>
-                typeof window['slopsmithViz_' + vp.id] === 'function'
-            );
+            const allPresent = vizPlugins.every(vp => hasVizFactory(vp.id));
             if (allPresent || ticks >= MAX_TICKS) {
                 clearInterval(_vizFactoryWatchTimer);
                 _vizFactoryWatchTimer = null;
@@ -458,7 +481,7 @@
         // A plugin can still customize *which* controls show via
         // window.slopsmithViz_highway_3d.panelControls.
         if (pluginId !== 'highway_3d') return null;
-        const fac = window['slopsmithViz_' + pluginId];
+        const fac = vizFactory(pluginId);
         // An array (even empty) is an intentional override — empty = opt out of
         // per-panel controls. _showVizControls hides the button on an empty list.
         if (fac && Array.isArray(fac.panelControls)) return fac.panelControls;
@@ -1339,7 +1362,7 @@
             });
         }
 
-        vizPlugins.filter(vp => typeof window['slopsmithViz_' + vp.id] === 'function').forEach(vp => {
+        vizPlugins.filter(vp => hasVizFactory(vp.id)).forEach(vp => {
             arrangements.forEach((a, i) => {
                 const opt = document.createElement('option');
                 opt.value = VIZ_PREFIX + ':' + vp.id + ':' + i;
@@ -1353,7 +1376,7 @@
         // off the bounded poll so the picker auto-repopulates once their
         // script registers window.slopsmithViz_<id>. Single-flight — cheap
         // to call on every populateSelect.
-        if (vizPlugins.some(vp => typeof window['slopsmithViz_' + vp.id] !== 'function')) {
+        if (vizPlugins.some(vp => !hasVizFactory(vp.id))) {
             _startVizFactoryWatch();
         }
     }
@@ -1499,7 +1522,7 @@
             // — panel keeps its previous (now-2D-after-exit*) highway.
             let newRenderer;
             try {
-                newRenderer = window['slopsmithViz_' + pluginId]();
+                newRenderer = vizFactory(pluginId)();
             } catch (e) {
                 console.error('[splitscreen] viz factory threw for', pluginId, '— staying in 2D:', e);
                 panel.tabBtn.style.display = '';
@@ -1605,7 +1628,7 @@
         // context is locked to the correct type (2D vs WebGL) on first init.
         // See CLAUDE.md "Canvas context-type lock" caveat.
         const vizFactoryFn = isVizMode && savedVizPluginId
-            ? window['slopsmithViz_' + savedVizPluginId]
+            ? vizFactory(savedVizPluginId)
             : null;
         // Guard the factory call. A buggy viz plugin throwing here would
         // bubble out of initPanel and abort the entire splitscreen start
@@ -1693,7 +1716,7 @@
                     // the panel still has a working chart.
                     let newRenderer;
                     try {
-                        newRenderer = window['slopsmithViz_' + pluginId]();
+                        newRenderer = vizFactory(pluginId)();
                     } catch (e) {
                         console.error('[splitscreen] viz factory threw for', pluginId, '— falling back to 2D:', e);
                         exitVizMode(panel, vizIdx);
