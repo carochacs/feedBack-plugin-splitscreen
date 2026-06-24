@@ -1,7 +1,7 @@
 {
   "id": "splitscreen",
   "name": "Split Screen",
-  "version": "1.10.7",
+  "version": "1.10.8",
   "private": false,
   "settings": {
     "html": "settings.html",
@@ -10,6 +10,6 @@
   "script": "screen.js",
   "tour": "tour.json",
   "category": "creation",
-  "description": "View two arrangements side by side.",
+  "description": "Practice multiple arrangements at once — split into 2–4 synced panels, each with its own view, or pop one out to another monitor.",
   "icon": "assets/thumb.svg"
 }
