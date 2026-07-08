@@ -4041,4 +4041,15 @@ try {
     // so all `let` bindings the function touches (e.g. _followerAudio) are
     // past their temporal dead zone by the time the function executes.
     if (FOLLOWER) bootFollowerMode();
+
+    // Node-only export hook for tests. Placed last so every `let`/`const`
+    // binding referenced by the exported functions has already run its
+    // initializer; does not affect the browser (module is undefined there).
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = {
+            getWsUrl, resolveArrIndex, getDefaultArrangements,
+            panelToPrefs, migratePanelPrefs, _ctlRange,
+            _setArrangementsForTest(next) { arrangements = next; },
+        };
+    }
 })();
