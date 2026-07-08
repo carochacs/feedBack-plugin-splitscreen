@@ -15,8 +15,8 @@ function makeLocalStorage() {
     };
 }
 
-function freshPlugin({ search = '' } = {}) {
-    const location = { search, host: 'localhost:8420', protocol: 'http:' };
+function freshPlugin({ search = '', protocol = 'http:' } = {}) {
+    const location = { search, host: 'localhost:8420', protocol };
     global.window = { location, addEventListener: () => {} };
     global.document = {
         getElementById: () => null,
@@ -48,9 +48,7 @@ test('getWsUrl omits the arrangement param when undefined', () => {
 });
 
 test('getWsUrl uses wss:// under https', () => {
-    global.location = { search: '', host: 'x', protocol: 'https:' };
-    const { getWsUrl } = freshPlugin();
-    global.location.protocol = 'https:'; // freshPlugin rebuilds location; keep consistent
+    const { getWsUrl } = freshPlugin({ protocol: 'https:' });
     assert.match(getWsUrl('a.sloppak', 1), /^wss:\/\//);
 });
 
