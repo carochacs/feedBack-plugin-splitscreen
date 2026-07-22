@@ -1403,6 +1403,15 @@ try {
             toggleDetect(panel);
             toggleDetect(panel);
         }
+
+        // panel.canvas was just replaced with a fresh element (context-type
+        // lock workaround above). External consumers of the documented
+        // window.slopsmithSplitscreen API (panelIndexFor/panelChromeFor/
+        // settingsAnchorFor/isCanvasFocused) that cached the old canvas from
+        // getPanels() would silently stop resolving this panel — notify so
+        // they can refresh their reference. Fires on every arrangement
+        // switch and viz mode enter/exit, both of which call this function.
+        _emitPanelsChanged();
     }
 
     // ── Per-panel viz controls ("3D ⚙" popover) ──
