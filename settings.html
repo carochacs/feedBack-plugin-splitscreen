@@ -17,4 +17,15 @@
         </label>
         <span class="text-xs text-gray-500">Automatically split every song on play</span>
     </div>
+    <div class="mt-4">
+        <label class="text-sm text-gray-300 block mb-1">LAN room key</label>
+        <div class="flex items-center gap-3">
+            <code id="splitscreen-room-key" class="text-base font-mono tracking-widest text-blue-300">——————</code>
+            <button type="button" id="splitscreen-room-key-regen" class="bg-dark-600 border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 cursor-pointer">Regenerate</button>
+        </div>
+        <span class="text-xs text-gray-500 block mt-1">
+            Devices on your network join a shared panel at <code>http://&lt;this-machine&gt;:&lt;port&gt;/?ss=KEY</code>.
+            The key is permanent so viewers can bookmark it; regenerating invalidates old bookmarks.
+        </span>
+    </div>
 </div>

@@ -65,6 +65,9 @@ screen.js
 | `splitscreenAlwaysSplit` | `'true'`/`'false'` |
 | `splitscreenPanelPrefs` | JSON array of per-panel pref objects (see below) |
 | `splitscreenControlsHidden` | `'true'`/`'false'` — whether bottom controls bar was hidden |
+| `splitscreenRoomKey` | Persistent 6-char LAN room key (splitscreen#21) — survives sessions so viewer bookmarks stay valid; rotated only via settings Regenerate |
+| `splitscreenLanShareActive` | `'true'` while a LAN share is live — read on load to auto-resume the share after a crash/reload |
+| `splitscreenLanShareCfg` | JSON of the shared panel's follower config (detect fields stripped) — what `config` replies carry |
 
 ### Panel pref object shape (in `splitscreenPanelPrefs`)
 
@@ -261,6 +264,18 @@ A panel can be detached into its own browser window (`⇱ Pop`) for multi-monito
 **Pop-out failure UX.** `popOutPanel` uses a non-blocking top-centre toast (`_showMainToast`) — never `alert()` — for "BroadcastChannel unsupported" / "popup blocked", and bails before mutating the layout, so the panel stays put.
 
 **Caveats.** localStorage is shared between the windows; per-panel viz keys (e.g. `h3d_bg_panel<N>_*`) written by both are last-write-wins (acceptable). The `ss-follower` chrome-hiding CSS keys on hardcoded element ids — brittle if core renames them (deliberate tradeoff vs. chasing every id). Re-popping the same panel isn't possible (it's removed from the layout on the first pop); multiple *different* panels can be popped at once (tracked in the `popups` Map by `popupId`).
+
+## LAN share / remote followers (splitscreen#21)
+
+A second follower transport: the server's `/ws/sync/{session_id}` relay (feedBack#1030, core ≥ the #1032 merge) carries the SAME message protocol as the BroadcastChannel to browsers on **other machines**. `_followerBusHandler(msg)` is the shared dispatch for both transports; popups wire it to `ch.onmessage` in `buildFollowerLayout`, remote viewers wire it to the relay socket.
+
+**Main side.** `📡 LAN` (per-panel, next to `⇱ Pop`; `panel.lanBtn`, main-window only) starts a share: `startLanShare(panel)` captures the panel's follower config **with detect fields stripped** into `_lanShare.cfg`, connects `_lanConnect()` to `/ws/sync/<room key>`, and opens the share dialog (`_showLanShareModal` — key big, join URLs from the desktop preload's `network.getLanAccess().urls` when available else `location.origin`, Copy, Stop). `_lanSend(msg)` mirrors every broadcast-channel post over the relay — `time` frames throttled to ~20 Hz (`LAN_TIME_MIN_INTERVAL_MS`); the local BC leg stays ≤60 Hz. The broadcaster now runs when `popups.size > 0 || _lanShare`. Relay-specific messages: viewers send `{type:'hello', popupId}`; the host answers each with `{type:'config', popupId, filename, cfg, t, playing}` (only once `currentFilename` exists — viewers hello-poll until then); `{type:'share-ended'}` is sent by `stopLanShare()` and is the ONLY terminal signal for viewers. Sharing is persistent: `_maybeResumeLanShare()` re-arms an active share at plugin load (crash/reload recovery), and the playSong wrapper re-arms the broadcaster.
+
+**Viewer side.** `?ss=<key>` (and no `ssFollower`) parses into `REMOTE_JOIN` (via `normalizeRoomKey` — 6 chars, `ROOM_KEY_ALPHABET`, case-insensitive). `bootRemoteJoin()` shows the waiting overlay and connects; on the first `config` it builds `FOLLOWER = makeRemoteFollowerCfg(msg, popupId)` (**`FOLLOWER` is `let` now**; `remote: true`; detect stripped) and runs the normal `bootFollowerMode()` — chart data still streams per-panel over `/ws/highway` directly, only clock/session messages ride the relay. Reconnect: infinite backoff (1s→10s cap), re-`hello` on every open; `main-closed` puts a REMOTE viewer into the recoverable waiting overlay (host reload/relaunch auto-resumes), NOT the orphan overlay — only `share-ended` orphans it. Remote viewers hide the Dock button, never post `docked`/`closed`, and never bind input devices.
+
+**Room key.** `ensureRoomKey()` — persistent per-install (`splitscreenRoomKey`), settings section displays it with Regenerate (rotating stops any live share). Alphabet `ABCDEFGHJKMNPQRSTVWXYZ23456789` (no 0/O/1/I/L/U) makes keys read-aloud-safe; `buildShareUrl(origin, key)` → `<origin>/?ss=<KEY>`.
+
+**Test-env note.** The end-of-IIFE boot gates remote-join/share-resume behind `_nodeTestEnv` (modern node has a global `WebSocket`, so a capability check alone would open real sockets under `node tests/screen.test.js`).
 
 ## `playSong` wrapper and the `_onReady` race
 

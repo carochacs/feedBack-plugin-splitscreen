@@ -184,11 +184,13 @@ try {
         // and main agree on the song).
         window.slopsmith.on('song:ready', () => {
             if (FOLLOWER) return;
-            if (typeof ssChannel === 'undefined' || !ssChannel) return;
-            if (!popups || popups.size === 0) return;
             if (!currentFilename) return;
-            try { ssChannel.postMessage({ type: 'song-changed', filename: currentFilename }); }
-            catch (e) { console.warn('[splitscreen] song-changed broadcast failed:', e); }
+            const msg = { type: 'song-changed', filename: currentFilename };
+            if (typeof ssChannel !== 'undefined' && ssChannel && popups && popups.size) {
+                try { ssChannel.postMessage(msg); }
+                catch (e) { console.warn('[splitscreen] song-changed broadcast failed:', e); }
+            }
+            _lanSend(msg);   // no-op unless a LAN share is active
         });
     }
 
@@ -341,6 +343,90 @@ try {
     // interaction.
     const _vizPluginsReady = fetchVizPlugins();
 
+    // ── LAN share helpers (splitscreen#21) ──
+    // Declared ABOVE the FOLLOWER/REMOTE_JOIN parse and the settings-sync
+    // block, both of which call into these during IIFE evaluation (the
+    // ROOM_KEY_* consts would otherwise be in their temporal dead zone).
+    // WS URL for the core session-sync relay endpoint (feedBack#1030).
+    function getSyncUrl(key) {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${proto}//${location.host}/ws/sync/${key}`;
+    }
+
+    // Room-key alphabet: unambiguity-filtered (no 0/O, 1/I/L, U) so a key can
+    // be read aloud across the room and typed on a TV remote without lookalike
+    // errors. 6 chars ≈ 30 bits — plenty for a trusted LAN: a wrong key just
+    // lands in an empty relay room, and the relay rate-caps scanning.
+    const ROOM_KEY_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
+    const ROOM_KEY_LENGTH = 6;
+    function generateRoomKey() {
+        let out = '';
+        try {
+            const buf = new Uint32Array(ROOM_KEY_LENGTH);
+            crypto.getRandomValues(buf);
+            for (let i = 0; i < ROOM_KEY_LENGTH; i++) out += ROOM_KEY_ALPHABET[buf[i] % ROOM_KEY_ALPHABET.length];
+        } catch (_) {
+            for (let i = 0; i < ROOM_KEY_LENGTH; i++) out += ROOM_KEY_ALPHABET[Math.floor(Math.random() * ROOM_KEY_ALPHABET.length)];
+        }
+        return out;
+    }
+
+    // Case-insensitive entry: trim + uppercase, then validate against the
+    // alphabet. The filtered alphabet is what makes lookalike tolerance work —
+    // a generated key can never contain 0/O/1/I/L/U, so there is nothing to
+    // mis-map. Returns the canonical uppercase key, or null.
+    function normalizeRoomKey(raw) {
+        if (typeof raw !== 'string') return null;
+        const key = raw.trim().toUpperCase();
+        if (key.length !== ROOM_KEY_LENGTH) return null;
+        for (const c of key) {
+            if (ROOM_KEY_ALPHABET.indexOf(c) === -1) return null;
+        }
+        return key;
+    }
+
+    // The persistent per-install room key (splitscreen#21: saved and reused so
+    // viewer bookmarks keep working across sessions; rotate via the settings
+    // page's Regenerate button).
+    function ensureRoomKey() {
+        let key = null;
+        try { key = normalizeRoomKey(localStorage.getItem('splitscreenRoomKey')); } catch (_) {}
+        if (!key) {
+            key = generateRoomKey();
+            try { localStorage.setItem('splitscreenRoomKey', key); } catch (_) {}
+        }
+        return key;
+    }
+
+    function buildShareUrl(origin, key) {
+        return String(origin).replace(/\/+$/, '') + '/?ss=' + key;
+    }
+
+    // Build the FOLLOWER config for a remote viewer from a relay `config`
+    // message. Mirrors the URL-param parse shape, with two deliberate
+    // differences: `remote: true` (gates dock/close semantics) and the
+    // note-detect fields stripped — viewers are passive mirrors and must
+    // never inherit the host's mic/device bindings.
+    function makeRemoteFollowerCfg(msg, popupId) {
+        const cfg = (msg && msg.cfg) || {};
+        return {
+            remote:      true,
+            popupId:     popupId || '',
+            filename:    msg.filename,
+            arrangement: parseInt(cfg.arrangement, 10) || 0,
+            name:        cfg.name || '',
+            mode:        cfg.mode || '2d',
+            inverted:    cfg.inverted === 1 || cfg.inverted === true,
+            lefty:       cfg.lefty === 1 || cfg.lefty === true,
+            mastery:     Number.isFinite(cfg.mastery) ? cfg.mastery : NaN,
+            lyrics:      !!cfg.lyrics,
+            barHidden:   !!cfg.barHidden,
+            detectChannel: 'mono',
+            detectDeviceName: '',
+            detectVerifierOffsetMs: 0,
+        };
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Pop-out / follower-mode (multi-monitor support).
     //
@@ -362,7 +448,10 @@ try {
     //  only. Carries the panel config received from the opener.
     // ══════════════════════════════════════════════════════════════════════
     const popups = new Map();
-    const FOLLOWER = (function () {
+    // `let`, not `const`: a REMOTE (LAN) viewer boots with only `?ss=<room key>`
+    // in the URL and receives its panel config over the sync relay — FOLLOWER
+    // is assigned there (bootRemoteJoin), always before bootFollowerMode runs.
+    let FOLLOWER = (function () {
         try {
             const params = new URLSearchParams(window.location.search);
             if (params.get('ssFollower') !== '1') return null;
@@ -385,6 +474,19 @@ try {
             };
             if (!cfg.filename) return null;
             return cfg;
+        } catch (_) {
+            return null;
+        }
+    })();
+    // Remote (LAN) viewer join key — `?ss=<room key>` (splitscreen#21). The
+    // URL carries ONLY the key so it stays hand-typeable; the panel config
+    // arrives over the server's /ws/sync relay (feedBack#1030) via the
+    // hello/config handshake in bootRemoteJoin. Null when absent/invalid.
+    const REMOTE_JOIN = (function () {
+        try {
+            if (FOLLOWER) return null;   // explicit follower params win
+            const params = new URLSearchParams(window.location.search);
+            return normalizeRoomKey(params.get('ss'));
         } catch (_) {
             return null;
         }
@@ -541,6 +643,27 @@ try {
             alwaysSplit = alwaysSplitCheckbox.checked;
             localStorage.setItem('splitscreenAlwaysSplit', alwaysSplit);
         });
+    }
+
+    // LAN room key (splitscreen#21) — display + Regenerate. The key is
+    // persistent by design (viewer bookmarks stay valid across sessions);
+    // regenerating rotates it and stops any live share, since its viewers
+    // would otherwise keep waiting on a room the host will never rejoin.
+    const roomKeyEl = document.getElementById('splitscreen-room-key');
+    if (roomKeyEl) {
+        roomKeyEl.textContent = ensureRoomKey();
+        const regenBtn = document.getElementById('splitscreen-room-key-regen');
+        if (regenBtn) {
+            regenBtn.addEventListener('click', () => {
+                const next = generateRoomKey();
+                try { localStorage.setItem('splitscreenRoomKey', next); } catch (_) {}
+                roomKeyEl.textContent = next;
+                if (_lanShare) {
+                    stopLanShare();
+                    _showMainToast('Room key regenerated — LAN sharing stopped. Share again to use the new key.');
+                }
+            });
+        }
     }
 
     // ── Panel preference persistence ──
@@ -1098,7 +1221,11 @@ try {
             'white-space:nowrap;outline:none;';
         popOutBtn.addEventListener('mouseenter', () => { popOutBtn.style.background = 'rgba(8,8,16,0.95)'; popOutBtn.style.borderColor = '#4080e0'; });
         popOutBtn.addEventListener('mouseleave', () => { popOutBtn.style.background = 'rgba(8,8,16,0.5)'; popOutBtn.style.borderColor = 'transparent'; });
-        if (FOLLOWER) {
+        if (FOLLOWER && FOLLOWER.remote) {
+            // A LAN viewer is a passive mirror — there is no panel slot in the
+            // host window to dock back into.
+            popOutBtn.style.display = 'none';
+        } else if (FOLLOWER) {
             popOutBtn.textContent = '⇲ Dock';
             popOutBtn.title = 'Return this panel to the main window';
         } else {
@@ -1106,6 +1233,20 @@ try {
             popOutBtn.title = 'Open this panel in a new window';
         }
         nameWrap.insertBefore(popOutBtn, nameInput);
+
+        // Share to LAN — main window only. Starts (or re-targets) the LAN
+        // share with THIS panel's config and opens the share dialog (room
+        // key + URL). Wired in initPanel() like popOutBtn.
+        let lanBtn = null;
+        if (!FOLLOWER) {
+            lanBtn = document.createElement('button');
+            lanBtn.textContent = '📡 LAN';
+            lanBtn.title = 'Share this panel to other devices on your network';
+            lanBtn.style.cssText = popOutBtn.style.cssText;
+            lanBtn.addEventListener('mouseenter', () => { lanBtn.style.background = 'rgba(8,8,16,0.95)'; lanBtn.style.borderColor = '#4080e0'; });
+            lanBtn.addEventListener('mouseleave', () => { lanBtn.style.background = 'rgba(8,8,16,0.5)'; lanBtn.style.borderColor = 'transparent'; });
+            nameWrap.insertBefore(lanBtn, nameInput);
+        }
 
         panelDiv.appendChild(bar);
 
@@ -1171,7 +1312,7 @@ try {
             channelBtn, deviceSelect, latWrap, latVal, latDown, latUp,
             vizSettingsBtn, vizPopover,
             masteryHeading, masterySlider, masteryLabel,
-            popOutBtn,
+            popOutBtn, lanBtn,
         };
     }
 
@@ -1754,6 +1895,21 @@ try {
             if (FOLLOWER) dockFollowerPanel(panel);
             else popOutPanel(panel);
         };
+
+        // Share-to-LAN button handler (main window only). If a share is
+        // already running, re-target it to this panel's current config so
+        // fresh viewers boot with what the user just pointed at.
+        if (panel.lanBtn) {
+            panel.lanBtn.onclick = () => {
+                if (!_lanShare) {
+                    if (!startLanShare(panel)) return;
+                } else {
+                    _lanShare.cfg = _lanCaptureCfg(panel);
+                    try { localStorage.setItem('splitscreenLanShareCfg', JSON.stringify(_lanShare.cfg)); } catch (_) {}
+                }
+                _showLanShareModal();
+            };
+        }
 
         // Populate arrangement dropdown (includes Lyrics, JT, and viz plugin options).
         // Use panel.arrIndex (already resolved from prefs above) so the dropdown
@@ -2545,6 +2701,7 @@ try {
     // could race ahead of a deferred _redockPanel and drop the popups entry.
     function dockFollowerPanel(panel) {
         if (!FOLLOWER) return;
+        if (FOLLOWER.remote) return;   // LAN viewers have nothing to dock into
         _followerDocking = true;
         try {
             const ch = _ssChannel();
@@ -2880,7 +3037,9 @@ try {
         if (_popupBroadcastInterval) return;
         const audio = document.getElementById('audio');
         const ch = _ssChannel();
-        if (!audio || !ch) return;
+        // LAN share runs the broadcaster too — even in a browser without
+        // BroadcastChannel (the relay leg doesn't need it).
+        if (!audio || (!ch && !_lanShare)) return;
         _popupBroadcastInterval = setInterval(() => {
             // Reap popups that vanished without firing beforeunload (crash /
             // forced close / OS kill): otherwise their slot lingers and we'd
@@ -2889,7 +3048,7 @@ try {
             for (const [id, e] of popups) {
                 if (e.popup && e.popup.closed) popups.delete(id);
             }
-            if (popups.size === 0) { _stopPopupBroadcaster(); return; }
+            if (popups.size === 0 && !_lanShare) { _stopPopupBroadcaster(); return; }
             // Only broadcast when the playhead actually moved — skips ~60
             // redundant structured-clone messages/sec (and the follower's
             // per-panel setTime + toast checks) while the main audio is paused.
@@ -2902,7 +3061,9 @@ try {
                 // Carry the play/pause state on every tick — cheap, and it
                 // means a freshly-opened popup learns it from the first
                 // message instead of waiting for a play/pause transition.
-                ch.postMessage({ type: 'time', t, playing: !audio.paused });
+                const msg = { type: 'time', t, playing: !audio.paused };
+                if (ch && popups.size) ch.postMessage(msg);
+                _lanSend(msg);   // throttled to ~20 Hz inside _lanSend
             }
         }, 1000 / 60);
     }
@@ -2915,9 +3076,306 @@ try {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    //  LAN share (main-window side) — splitscreen#21.
+    //
+    //  Mirrors the popup sync messages (time / playstate / song-changed /
+    //  main-closed) to the server's /ws/sync/<room key> relay (feedBack#1030)
+    //  so browsers on OTHER machines can run the same follower mode. The
+    //  message protocol is identical to the BroadcastChannel leg, plus:
+    //    hello  (viewer → host): announce/poll; host answers with `config`.
+    //    config (host → viewer): filename + the shared panel cfg + playhead.
+    //                            Re-answered on every hello, which is what
+    //                            makes late join / refresh / reconnect work.
+    //    share-ended (host → viewers): terminal — user clicked Stop sharing.
+    //
+    //  Persistence: the room key lives in localStorage (splitscreenRoomKey,
+    //  persistent so viewer bookmarks survive sessions) and an active share
+    //  is re-armed on the next load (_maybeResumeLanShare) — a host that
+    //  crashes or reloads resumes publishing on the same key and viewers
+    //  reconnect without interaction.
+    // ══════════════════════════════════════════════════════════════════════
+    let _lanShare = null;          // { key, cfg, ws, retryTimer, backoffMs } | null
+    let _lanLastTimeSentPerf = 0;
+    // ~20 Hz on the network leg (the local BroadcastChannel stays ≤60 Hz).
+    // The follower clock interpolates between messages, so this is visually
+    // indistinguishable while cutting relay traffic to a third.
+    const LAN_TIME_MIN_INTERVAL_MS = 50;
+
+    function _lanSend(msg) {
+        const ws = _lanShare && _lanShare.ws;
+        if (!ws || ws.readyState !== 1) return;
+        if (msg.type === 'time') {
+            const now = performance.now();
+            if (now - _lanLastTimeSentPerf < LAN_TIME_MIN_INTERVAL_MS) return;
+            _lanLastTimeSentPerf = now;
+        }
+        try { ws.send(JSON.stringify(msg)); } catch (_) {}
+    }
+
+    // Answer a viewer's `hello`. No song loaded yet → answer nothing; the
+    // viewer hello-polls until a config with a filename can be produced.
+    function _lanHelloResponse(popupId) {
+        if (!_lanShare || !currentFilename) return null;
+        const audio = document.getElementById('audio');
+        return {
+            type: 'config',
+            popupId: popupId || '',
+            filename: currentFilename,
+            cfg: _lanShare.cfg || null,
+            t: (audio && Number.isFinite(audio.currentTime)) ? audio.currentTime : 0,
+            playing: !!(audio && !audio.paused),
+        };
+    }
+
+    function _lanConnect() {
+        if (!_lanShare || _lanShare.ws) return;
+        let ws;
+        try { ws = new WebSocket(getSyncUrl(_lanShare.key)); } catch (_) { _lanScheduleReconnect(); return; }
+        _lanShare.ws = ws;
+        ws.onopen = () => { if (_lanShare) _lanShare.backoffMs = 1000; };
+        ws.onmessage = (ev) => {
+            if (!_lanShare) return;
+            let msg = null;
+            try { msg = JSON.parse(ev.data); } catch (_) { return; }
+            if (msg && msg.type === 'hello') {
+                const resp = _lanHelloResponse(msg.popupId);
+                if (resp) _lanSend(resp);
+            }
+        };
+        ws.onclose = () => {
+            if (!_lanShare || _lanShare.ws !== ws) return;
+            _lanShare.ws = null;
+            _lanScheduleReconnect();
+        };
+        ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    }
+
+    function _lanScheduleReconnect() {
+        if (!_lanShare || _lanShare.retryTimer) return;
+        const delay = _lanShare.backoffMs || 1000;
+        _lanShare.backoffMs = Math.min(delay * 2, 10000);
+        _lanShare.retryTimer = setTimeout(() => {
+            if (!_lanShare) return;
+            _lanShare.retryTimer = null;
+            _lanConnect();
+        }, delay);
+    }
+
+    // Capture `panel` as the shared config — with the note-detect fields
+    // stripped (viewers are passive mirrors; never forward mic bindings).
+    function _lanCaptureCfg(panel) {
+        return Object.assign(_captureFollowerConfig(panel), {
+            detectChannel: 'mono', detectDeviceName: '', detectVerifierOffsetMs: 0,
+        });
+    }
+
+    function startLanShare(panel) {
+        if (typeof WebSocket !== 'function') {
+            _showMainToast('LAN sharing requires WebSocket support.');
+            return false;
+        }
+        const key = ensureRoomKey();
+        const cfg = panel ? _lanCaptureCfg(panel) : null;
+        _lanShare = { key, cfg, ws: null, retryTimer: null, backoffMs: 1000 };
+        try {
+            localStorage.setItem('splitscreenLanShareActive', 'true');
+            localStorage.setItem('splitscreenLanShareCfg', JSON.stringify(cfg));
+        } catch (_) {}
+        _lanConnect();
+        _ensureMainBroadcasterAndListener();
+        _startPopupBroadcaster();
+        return true;
+    }
+
+    function stopLanShare() {
+        if (!_lanShare) return;
+        _lanSend({ type: 'share-ended' });   // terminal for viewers — before teardown
+        const s = _lanShare;
+        _lanShare = null;                    // null first: onclose must not reconnect
+        if (s.retryTimer) clearTimeout(s.retryTimer);
+        if (s.ws) { try { s.ws.close(); } catch (_) {} }
+        try {
+            localStorage.removeItem('splitscreenLanShareActive');
+            localStorage.removeItem('splitscreenLanShareCfg');
+        } catch (_) {}
+    }
+
+    // Re-arm a share that was active when this window last unloaded (crash,
+    // reload, app relaunch) so viewers left open on other devices recover
+    // without any interaction — the crash-recovery contract (splitscreen#21).
+    function _maybeResumeLanShare() {
+        if (FOLLOWER || REMOTE_JOIN || _lanShare) return;
+        if (typeof WebSocket !== 'function') return;
+        try {
+            if (localStorage.getItem('splitscreenLanShareActive') !== 'true') return;
+            let cfg = null;
+            try { cfg = JSON.parse(localStorage.getItem('splitscreenLanShareCfg') || 'null'); } catch (_) {}
+            _lanShare = { key: ensureRoomKey(), cfg, ws: null, retryTimer: null, backoffMs: 1000 };
+            _lanConnect();
+            _ensureMainBroadcasterAndListener();
+            _startPopupBroadcaster();
+        } catch (_) {}
+    }
+
+    // Copy with a non-secure-context fallback. LAN hosts are frequently plain
+    // http (e.g. a Docker session at http://192.168.x.x), where
+    // navigator.clipboard does not exist — fall back to the classic
+    // hidden-textarea + execCommand('copy') path. Resolves true on success.
+    function _copyTextToClipboard(text) {
+        return new Promise((resolve) => {
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(
+                        () => resolve(true),
+                        () => resolve(_copyViaExecCommand(text)));
+                    return;
+                }
+            } catch (_) {}
+            resolve(_copyViaExecCommand(text));
+        });
+    }
+    function _copyViaExecCommand(text) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            ta.remove();
+            return ok;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    // Share dialog: the room key big (the part someone reads aloud), the join
+    // URL(s), Copy, and Stop sharing. On desktop, the preload's network API
+    // supplies the machine's LAN addresses (the renderer itself loads from
+    // 127.0.0.1, which is useless to other devices); in a plain browser /
+    // Docker session, location.origin is already the address the viewer needs.
+    let _lanShareModalEl = null;
+    let _lanShareModalSeq = 0;   // invocation nonce — see the await note below
+    function _closeLanShareModal() {
+        if (_lanShareModalEl) { try { _lanShareModalEl.remove(); } catch (_) {} _lanShareModalEl = null; }
+    }
+    async function _showLanShareModal() {
+        // The getLanAccess() await below yields: a second invocation entering
+        // meanwhile would otherwise stack a second overlay on top of this
+        // one's (the sync close-at-entry can't see a not-yet-appended modal).
+        // Only the latest invocation is allowed to render.
+        const seq = ++_lanShareModalSeq;
+        _closeLanShareModal();
+        const key = _lanShare ? _lanShare.key : ensureRoomKey();
+
+        let origins = [location.origin];
+        let lanNote = '';
+        try {
+            const desktop = window.feedBackDesktop || window.slopsmithDesktop;
+            const net = desktop && desktop.network;
+            if (net && typeof net.getLanAccess === 'function') {
+                const res = await net.getLanAccess();
+                if (res && res.enabled && Array.isArray(res.urls) && res.urls.length) {
+                    origins = res.urls;
+                } else if (res && !res.enabled) {
+                    lanNote = 'LAN access is OFF — enable it in the Plugin Manager’s Network section, or other devices cannot reach this machine.';
+                }
+            }
+        } catch (_) {}
+        if (seq !== _lanShareModalSeq) return;   // superseded while awaiting
+
+        const overlay = document.createElement('div');
+        overlay.id = 'ss-lan-share-modal';
+        overlay.style.cssText =
+            'position:fixed;inset:0;z-index:10003;background:rgba(0,0,0,0.55);' +
+            'display:flex;align-items:center;justify-content:center;font-family:sans-serif;';
+        overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) _closeLanShareModal(); });
+
+        const box = document.createElement('div');
+        box.style.cssText =
+            'background:rgba(10,10,20,0.98);border:1px solid #4080e0;border-radius:10px;' +
+            'padding:20px 24px;max-width:520px;width:calc(100vw - 48px);color:#e5e7eb;' +
+            'box-shadow:0 10px 40px rgba(0,0,0,0.6);';
+
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:15px;font-weight:600;margin-bottom:10px;';
+        title.textContent = _lanShare ? 'Sharing to LAN' : 'LAN room key';
+        box.appendChild(title);
+
+        const keyEl = document.createElement('div');
+        keyEl.style.cssText =
+            'font-family:monospace;font-size:34px;font-weight:700;letter-spacing:6px;' +
+            'text-align:center;color:#8ab4ff;margin:6px 0 14px;user-select:text;';
+        keyEl.textContent = key;
+        box.appendChild(keyEl);
+
+        if (lanNote) {
+            const warn = document.createElement('div');
+            warn.style.cssText = 'font-size:12px;color:#fbbf24;margin-bottom:10px;';
+            warn.textContent = lanNote;
+            box.appendChild(warn);
+        }
+
+        const urlLabel = document.createElement('div');
+        urlLabel.style.cssText = 'font-size:12px;color:#9ca3af;margin-bottom:4px;';
+        urlLabel.textContent = 'Open on the other device (or bookmark it — the key is permanent):';
+        box.appendChild(urlLabel);
+        const urls = origins.map(o => buildShareUrl(o, key));
+        for (const u of urls) {
+            const line = document.createElement('div');
+            line.style.cssText = 'font-family:monospace;font-size:13px;color:#d1d5db;user-select:text;margin:2px 0;';
+            line.textContent = u;
+            box.appendChild(line);
+        }
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;margin-top:16px;justify-content:flex-end;flex-wrap:wrap;';
+        const mkBtn = (label) => {
+            const b = document.createElement('button');
+            b.textContent = label;
+            b.style.cssText =
+                'padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;outline:none;' +
+                'background:#1a1a2e;border:1px solid #333;color:#ccc;';
+            return b;
+        };
+        const copyBtn = mkBtn('Copy URL');
+        copyBtn.onclick = () => {
+            const flash = (label) => {
+                copyBtn.textContent = label;
+                setTimeout(() => { copyBtn.textContent = 'Copy URL'; }, 2000);
+            };
+            _copyTextToClipboard(urls[0]).then((ok) => {
+                flash(ok ? 'Copied!' : 'Copy failed — select it above');
+            });
+        };
+        btnRow.appendChild(copyBtn);
+        if (_lanShare) {
+            const stopBtn = mkBtn('Stop sharing');
+            stopBtn.style.borderColor = '#7f1d1d';
+            stopBtn.style.color = '#fca5a5';
+            stopBtn.onclick = () => {
+                stopLanShare();
+                _closeLanShareModal();
+                _showMainToast('LAN sharing stopped.');
+            };
+            btnRow.appendChild(stopBtn);
+        }
+        const closeBtn = mkBtn('Close');
+        closeBtn.onclick = _closeLanShareModal;
+        btnRow.appendChild(closeBtn);
+        box.appendChild(btnRow);
+
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        _lanShareModalEl = overlay;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     //  Main-window broadcaster / listener for popped-out panels
     // ══════════════════════════════════════════════════════════════════════
     let _mainChannelListenerAttached = false;
+    let _mainAudioListenersEl = null;   // the <audio> the play/pause listeners are bound to
     // Broadcast the current play/pause state to any popups so they can pause
     // their time extrapolation precisely (instead of relying solely on the
     // "audio time stopped advancing" heuristic + backstop). Best-effort: in
@@ -2926,34 +3384,47 @@ try {
     function _broadcastMainPlayState() {
         try {
             const ch = _ssChannel();
-            if (!ch || !popups.size) return;
+            if ((!ch || !popups.size) && !_lanShare) return;
             const audio = document.getElementById('audio');
-            ch.postMessage({ type: 'playstate', playing: !!(audio && !audio.paused) });
+            const msg = { type: 'playstate', playing: !!(audio && !audio.paused) };
+            if (ch && popups.size) ch.postMessage(msg);
+            _lanSend(msg);
         } catch (_) {}
     }
     function _ensureMainBroadcasterAndListener() {
         if (FOLLOWER) return;            // never run in popup
-        const ch = _ssChannel();
-        if (!ch || _mainChannelListenerAttached) return;
-        _mainChannelListenerAttached = true;
-        ch.onmessage = (ev) => {
-            const msg = ev.data || {};
-            if (msg.type === 'docked' && msg.popupId && popups.has(msg.popupId)) {
-                _redockPanel(msg.popupId, msg.finalState || null);
-            } else if (msg.type === 'closed' && msg.popupId && popups.has(msg.popupId)) {
-                // Popup was closed without an explicit Dock click. Treat
-                // the panel as removed; don't re-add. Just drop the entry —
-                // unless a redock for it is already queued (a `docked` arrived
-                // while a start was in flight). The popup suppresses this post
-                // when docking, so that only happens with an older popup build;
-                // belt-and-suspenders.
-                if (!_pendingRedocks.some(r => r.popupId === msg.popupId)) {
-                    popups.delete(msg.popupId);
+        // Two independently-guarded halves. The channel handler is once-ever;
+        // the audio play/pause listeners re-attempt on every call, keyed to
+        // the element they're bound to — a crash-recovery resume can run this
+        // before #audio exists (early load), and a single shared flag would
+        // then swallow the listeners forever, silencing every `playstate`
+        // message (which followers rely on precisely when `time` ticks stop).
+        if (!_mainChannelListenerAttached) {
+            _mainChannelListenerAttached = true;
+            // The BroadcastChannel leg is popup-only; a LAN-only share still
+            // needs the audio play/pause listeners below, so a missing channel
+            // (no BroadcastChannel support) doesn't bail the whole function.
+            const ch = _ssChannel();
+            if (ch) ch.onmessage = (ev) => {
+                const msg = ev.data || {};
+                if (msg.type === 'docked' && msg.popupId && popups.has(msg.popupId)) {
+                    _redockPanel(msg.popupId, msg.finalState || null);
+                } else if (msg.type === 'closed' && msg.popupId && popups.has(msg.popupId)) {
+                    // Popup was closed without an explicit Dock click. Treat
+                    // the panel as removed; don't re-add. Just drop the entry —
+                    // unless a redock for it is already queued (a `docked` arrived
+                    // while a start was in flight). The popup suppresses this post
+                    // when docking, so that only happens with an older popup build;
+                    // belt-and-suspenders.
+                    if (!_pendingRedocks.some(r => r.popupId === msg.popupId)) {
+                        popups.delete(msg.popupId);
+                    }
                 }
-            }
-        };
+            };
+        }
         const audio = document.getElementById('audio');
-        if (audio) {
+        if (audio && _mainAudioListenersEl !== audio) {
+            _mainAudioListenersEl = audio;
             audio.addEventListener('play', _broadcastMainPlayState);
             audio.addEventListener('pause', _broadcastMainPlayState);
         }
@@ -3247,6 +3718,10 @@ try {
             try {
                 const c = _ssChannel();
                 if (c && popups.size) c.postMessage({ type: 'main-closed' });
+                // Remote viewers hold in a reconnectable "waiting" state on
+                // this (host reload/relaunch auto-resumes the share); only an
+                // explicit share-ended is terminal for them.
+                _lanSend({ type: 'main-closed' });
             } catch (_) {}
         });
     }
@@ -3262,6 +3737,12 @@ try {
         // popover empty. Keep the trailing call too so a wrapper that
         // rebuilds #player-controls (v2 behaviour) still re-injects.
         if (!FOLLOWER) injectBtn();
+        // A resumed LAN share may have started before the <audio> element was
+        // usable — idempotently re-arm the broadcaster now that a song plays.
+        if (!FOLLOWER && _lanShare) {
+            _ensureMainBroadcasterAndListener();
+            _startPopupBroadcaster();
+        }
         // Capture the filename eagerly for the same reason — when an
         // upstream wrapper throws, the `currentFilename = f` assignment
         // below the await is skipped and panel WS connections open with
@@ -3298,8 +3779,10 @@ try {
             // changed so they can swap to the new chart in their current
             // mode + arrangement. Only the main window broadcasts; FOLLOWER
             // windows skip this.
-            if (!FOLLOWER && popups.size > 0 && ssChannel) {
-                ssChannel.postMessage({ type: 'song-changed', filename: currentFilename });
+            if (!FOLLOWER) {
+                const scMsg = { type: 'song-changed', filename: currentFilename };
+                if (popups.size > 0 && ssChannel) ssChannel.postMessage(scMsg);
+                _lanSend(scMsg);
             }
 
             if (!handled && !FOLLOWER && (alwaysSplit || wasActive)) {
@@ -3498,10 +3981,21 @@ try {
 
     // The main window is closing — stop syncing, tear the panels down, and
     // tell the user. Idempotent.
-    function _onFollowerOrphaned() {
+    function _onFollowerOrphaned(title, subText) {
         if (_followerOrphaned) return;
         _followerOrphaned = true;
         _stopFollowerInterp();
+        _hideRemoteWaiting();
+        // Tear the remote (LAN) transport down with the viewer: stop the
+        // hello-poll and close the relay socket. Orphaned is terminal — no
+        // reconnect (nulling _remoteWs first makes its onclose a no-op, and
+        // the reconnect scheduler checks _followerOrphaned anyway).
+        _remoteStopHelloPoll();
+        if (_remoteWs) {
+            const w = _remoteWs;
+            _remoteWs = null;
+            try { w.close(); } catch (_) {}
+        }
         try { teardownPanels(); } catch (_) {}   // also stops every panel highway / WS / rAF
         if (_followerToolbar) { try { _followerToolbar.remove(); } catch (_) {} _followerToolbar = null; }
         if (_followerToast) { try { _followerToast.remove(); } catch (_) {} _followerToast = null; }
@@ -3513,13 +4007,61 @@ try {
             'font-family:sans-serif;text-align:center;padding:24px;';
         const h = document.createElement('div');
         h.style.cssText = 'font-size:18px;font-weight:600;color:#e5e7eb;';
-        h.textContent = 'Main Slopsmith window closed';
+        h.textContent = title || 'Main Slopsmith window closed';
         const sub = document.createElement('div');
         sub.style.cssText = 'font-size:13px;';
-        sub.textContent = 'This follower window is no longer synced — you can close it.';
+        sub.textContent = subText || 'This follower window is no longer synced — you can close it.';
         o.appendChild(h);
         o.appendChild(sub);
         document.body.appendChild(o);
+    }
+
+    // Shared message dispatch for both follower transports: the local
+    // BroadcastChannel (popup windows) and the LAN relay WebSocket (remote
+    // viewers). Reads live module state, so it survives layout rebuilds.
+    function _followerBusHandler(msg) {
+        if (_followerOrphaned || !msg) return;
+        const remote = !!(FOLLOWER && FOLLOWER.remote);
+        if (msg.type === 'time' && Number.isFinite(msg.t)) {
+            _onFollowerTimeMessage(msg.t, msg.playing);
+        } else if (msg.type === 'playstate') {
+            _onFollowerPlayState(!!msg.playing);
+        } else if (msg.type === 'main-closed') {
+            if (remote) {
+                // For a LAN viewer, the host window going away is often just a
+                // reload/relaunch (the share auto-resumes on the same key).
+                // Hold in the reconnectable waiting state; only an explicit
+                // `share-ended` is terminal.
+                _followerPlaying = false;
+                _showRemoteWaiting('Host closed — waiting for it to come back…');
+            } else {
+                _onFollowerOrphaned();
+            }
+        } else if (msg.type === 'share-ended') {
+            if (remote) {
+                _onFollowerOrphaned('Sharing ended',
+                    'The host stopped sharing this session — you can close this tab.');
+            }
+        } else if (msg.type === 'song-changed' && msg.filename && msg.filename !== currentFilename) {
+            _handleFollowerSongChange(msg.filename);
+        } else if (msg.type === 'config' && remote && msg.filename && msg.popupId === _remotePopupId) {
+            // Config replies also arrive after a relay reconnect (we re-hello
+            // on every open) and while waiting out a host restart (the hello
+            // poll keeps running in that state): treat as recovery — dismiss
+            // the waiting overlay, follow any song change we missed, re-anchor
+            // the clock. Guarded to OUR popupId: the relay is a broadcast
+            // room, so replies to other viewers' hellos also arrive here.
+            _hideRemoteWaiting();
+            if (msg.filename !== currentFilename) _handleFollowerSongChange(msg.filename);
+            if (Number.isFinite(msg.t)) _onFollowerTimeMessage(msg.t, msg.playing);
+        }
+        // Any live host traffic while the "waiting for host" overlay is up
+        // proves the host is back (it may resume playing without anyone
+        // sending a fresh hello) — drop the overlay.
+        if (remote && _remoteWaitingShown
+            && (msg.type === 'time' || msg.type === 'playstate' || msg.type === 'song-changed')) {
+            _hideRemoteWaiting();
+        }
     }
 
     // Cached reference to the popup's <audio> element so the song-change
@@ -3586,6 +4128,9 @@ try {
         window.addEventListener('beforeunload', () => {
             _stopFollowerInterp();
             if (_followerDocking) return;
+            // Remote viewers hold no slot in any main window — nothing to
+            // release (and their BroadcastChannel reaches no host anyway).
+            if (FOLLOWER.remote) return;
             try {
                 const c = _ssChannel();
                 if (c) c.postMessage({ type: 'closed', popupId: FOLLOWER.popupId });
@@ -3832,25 +4377,17 @@ try {
         // now that `active` is true, so a split follower exposes each sub-panel.
         _emitPanelsChanged();
 
-        // Subscribe to the broadcast channel for time / playstate / song-change
-        // / main-closed. Re-assigning `onmessage` on each rebuild replaces the
-        // prior handler (no listener stacking); each handler reads the live
-        // module-level `panels` so it always sees the current grid.
-        const ch = _ssChannel();
-        if (ch) {
-            ch.onmessage = (ev) => {
-                if (_followerOrphaned) return;
-                const msg = ev.data || {};
-                if (msg.type === 'time' && Number.isFinite(msg.t)) {
-                    _onFollowerTimeMessage(msg.t, msg.playing);
-                } else if (msg.type === 'playstate') {
-                    _onFollowerPlayState(!!msg.playing);
-                } else if (msg.type === 'main-closed') {
-                    _onFollowerOrphaned();
-                } else if (msg.type === 'song-changed' && msg.filename && msg.filename !== currentFilename) {
-                    _handleFollowerSongChange(msg.filename);
-                }
-            };
+        // Subscribe to the sync transport for time / playstate / song-change
+        // / main-closed. Popups use the BroadcastChannel (re-assigning
+        // `onmessage` on each rebuild replaces the prior handler — no listener
+        // stacking); remote (LAN) viewers already dispatch relay messages into
+        // _followerBusHandler, which reads live module state and needs no
+        // re-subscription on rebuild.
+        if (!(FOLLOWER && FOLLOWER.remote)) {
+            const ch = _ssChannel();
+            if (ch) {
+                ch.onmessage = (ev) => _followerBusHandler(ev.data || {});
+            }
         }
         // Make sure the extrapolation loop is running (cheap if already started
         // from bootFollowerMode; also covers a hypothetical rebuild before boot).
@@ -4124,10 +4661,154 @@ try {
         });
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  Remote (LAN) viewer — `?ss=<room key>` boot path (splitscreen#21).
+    //
+    //  A browser on another machine joins the host's relay room and sends
+    //  `hello` until the host answers with `config` (filename + panel cfg +
+    //  playhead). That config becomes FOLLOWER (with `remote: true`) and the
+    //  normal follower boot runs — every panel opens its own /ws/highway
+    //  chart stream directly against this server, so only the clock/session
+    //  messages ride the relay.
+    //
+    //  Resilience: the socket reconnects with backoff forever and re-hellos
+    //  on every open, so a host crash/reload (which auto-resumes its share on
+    //  the same persistent key) recovers viewers with zero interaction. The
+    //  overlay distinguishes the states: waiting/reconnecting (recoverable)
+    //  vs the terminal orphan overlay on an explicit `share-ended`.
+    // ══════════════════════════════════════════════════════════════════════
+    let _remoteWs = null;
+    let _remoteBackoffMs = 1000;
+    let _remoteHelloTimer = null;
+    let _remotePopupId = '';
+    let _remoteWaitingEl = null;
+    let _remoteWaitingShown = false;
+
+    // Hello-poll: runs pre-boot (host may not be sharing / have a song yet)
+    // AND while the waiting overlay is up after a host restart — a relaunched
+    // host that sits paused emits nothing on its own, so polling is what
+    // fetches the config that dismisses the overlay and re-syncs the song.
+    // Self-stops once booted and not waiting.
+    function _remoteStartHelloPoll() {
+        if (_remoteHelloTimer != null) return;
+        _remoteHelloTimer = setInterval(() => {
+            if (FOLLOWER && !_remoteWaitingShown) { _remoteStopHelloPoll(); return; }
+            _remoteSendHello();
+        }, 3000);
+    }
+    function _remoteStopHelloPoll() {
+        if (_remoteHelloTimer != null) {
+            clearInterval(_remoteHelloTimer);
+            _remoteHelloTimer = null;
+        }
+    }
+
+    function _showRemoteWaiting(text) {
+        if (_followerOrphaned) return;
+        _remoteWaitingShown = true;
+        _remoteStartHelloPoll();
+        if (!_remoteWaitingEl) {
+            const o = document.createElement('div');
+            o.id = 'ss-remote-waiting';
+            o.style.cssText =
+                'position:fixed;inset:0;z-index:99999;background:rgba(10,10,20,0.92);color:#9ca3af;' +
+                'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;' +
+                'font-family:sans-serif;text-align:center;padding:24px;';
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size:18px;font-weight:600;color:#e5e7eb;';
+            h.textContent = 'LAN viewer';
+            const s = document.createElement('div');
+            s.id = 'ss-remote-waiting-text';
+            s.style.cssText = 'font-size:13px;';
+            o.appendChild(h);
+            o.appendChild(s);
+            document.body.appendChild(o);
+            _remoteWaitingEl = o;
+        }
+        const t = _remoteWaitingEl.querySelector('#ss-remote-waiting-text');
+        if (t) t.textContent = text || 'Connecting…';
+        _remoteWaitingEl.style.display = 'flex';
+    }
+    function _hideRemoteWaiting() {
+        _remoteWaitingShown = false;   // hello-poll self-stops on its next tick
+        if (_remoteWaitingEl) _remoteWaitingEl.style.display = 'none';
+    }
+
+    function _remoteSendHello() {
+        if (_remoteWs && _remoteWs.readyState === 1) {
+            try { _remoteWs.send(JSON.stringify({ type: 'hello', popupId: _remotePopupId })); } catch (_) {}
+        }
+    }
+
+    function _remoteConnect() {
+        if (_followerOrphaned) return;
+        let ws;
+        try { ws = new WebSocket(getSyncUrl(REMOTE_JOIN)); } catch (_) { _remoteScheduleReconnect(); return; }
+        _remoteWs = ws;
+        ws.onopen = () => {
+            _remoteBackoffMs = 1000;
+            _remoteSendHello();
+            _remoteStartHelloPoll();   // self-stops once booted and not waiting
+        };
+        ws.onmessage = (ev) => {
+            let msg = null;
+            try { msg = JSON.parse(ev.data); } catch (_) { return; }
+            if (!msg) return;
+            if (!FOLLOWER) {
+                // Pre-boot: only config (boots us) and share-ended (terminal)
+                // matter; time frames are meaningless without panels. Only OUR
+                // hello's reply boots us — the relay room broadcasts every
+                // viewer's config reply to everyone.
+                if (msg.type === 'config' && msg.filename && msg.popupId === _remotePopupId) {
+                    FOLLOWER = makeRemoteFollowerCfg(msg, _remotePopupId);
+                    _hideRemoteWaiting();
+                    bootFollowerMode();
+                    if (Number.isFinite(msg.t)) _onFollowerTimeMessage(msg.t, msg.playing);
+                } else if (msg.type === 'share-ended') {
+                    _onFollowerOrphaned('Sharing ended',
+                        'The host stopped sharing this session — you can close this tab.');
+                }
+                return;
+            }
+            _followerBusHandler(msg);
+        };
+        ws.onclose = () => {
+            if (_remoteWs !== ws) return;
+            _remoteWs = null;
+            if (_followerOrphaned) return;
+            _followerPlaying = false;   // don't extrapolate into the void
+            _showRemoteWaiting('Connection lost — reconnecting…');
+            _remoteScheduleReconnect();
+        };
+        ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    }
+
+    function _remoteScheduleReconnect() {
+        if (_followerOrphaned) return;
+        const delay = _remoteBackoffMs;
+        _remoteBackoffMs = Math.min(_remoteBackoffMs * 2, 10000);
+        setTimeout(() => {
+            if (!_remoteWs && !_followerOrphaned) _remoteConnect();
+        }, delay);
+    }
+
+    function bootRemoteJoin() {
+        _remotePopupId = 'lan-' + _newPopupId();
+        _showRemoteWaiting('Connecting to host…');
+        _remoteConnect();
+    }
+
     // Kick off follower-mode bootstrap — placed at the very end of the IIFE
     // so all `let` bindings the function touches (e.g. _followerAudio) are
     // past their temporal dead zone by the time the function executes.
+    // The remote-join / share-resume paths open real sockets and build DOM,
+    // so they are additionally gated out of the node test harness (which,
+    // on modern node, DOES have a global WebSocket).
+    const _nodeTestEnv = (typeof module !== 'undefined' && !!module.exports);
     if (FOLLOWER) bootFollowerMode();
+    else if (_nodeTestEnv) { /* helpers-only environment — no boot */ }
+    else if (REMOTE_JOIN && typeof WebSocket === 'function') bootRemoteJoin();
+    else _maybeResumeLanShare();
 
     // Node-only export hook for tests. Placed last so every `let`/`const`
     // binding referenced by the exported functions has already run its
@@ -4136,6 +4817,8 @@ try {
         module.exports = {
             getWsUrl, resolveArrIndex, getDefaultArrangements,
             panelToPrefs, migratePanelPrefs, _ctlRange,
+            getSyncUrl, generateRoomKey, normalizeRoomKey, ensureRoomKey,
+            buildShareUrl, makeRemoteFollowerCfg, ROOM_KEY_ALPHABET,
             _setArrangementsForTest(next) { arrangements = next; },
         };
     }

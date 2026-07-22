@@ -159,3 +159,111 @@ test('migratePanelPrefs does not reset lyrics once already migrated to v2', () =
     const out = mod.migratePanelPrefs([{ arrName: 'Lead', lyrics: true }]);
     assert.equal(out[0].lyrics, true);
 });
+
+// ── LAN share helpers (splitscreen#21) ──
+
+test('ROOM_KEY_ALPHABET excludes every lookalike glyph', () => {
+    const { ROOM_KEY_ALPHABET } = freshPlugin();
+    for (const c of '0O1IlLuU') {
+        assert.equal(ROOM_KEY_ALPHABET.indexOf(c.toUpperCase()), -1, `alphabet must not contain ${c}`);
+    }
+});
+
+test('generateRoomKey emits 6 chars drawn from the alphabet', () => {
+    const mod = freshPlugin();
+    for (let i = 0; i < 20; i++) {
+        const key = mod.generateRoomKey();
+        assert.equal(key.length, 6);
+        for (const c of key) assert.notEqual(mod.ROOM_KEY_ALPHABET.indexOf(c), -1);
+    }
+});
+
+test('normalizeRoomKey is case-insensitive, trims, and rejects junk', () => {
+    const { normalizeRoomKey } = freshPlugin();
+    assert.equal(normalizeRoomKey('k7tr4m'), 'K7TR4M');
+    assert.equal(normalizeRoomKey('  K7TR4M  '), 'K7TR4M');
+    assert.equal(normalizeRoomKey('K7TR4'), null);      // too short
+    assert.equal(normalizeRoomKey('K7TR4MM'), null);    // too long
+    assert.equal(normalizeRoomKey('K7TR40'), null);     // 0 not in alphabet
+    assert.equal(normalizeRoomKey('K7TR4O'), null);     // O not in alphabet
+    assert.equal(normalizeRoomKey(null), null);
+    assert.equal(normalizeRoomKey(undefined), null);
+    assert.equal(normalizeRoomKey(123456), null);
+});
+
+test('ensureRoomKey persists a key and returns the same one thereafter', () => {
+    const mod = freshPlugin();
+    const first = mod.ensureRoomKey();
+    assert.equal(mod.normalizeRoomKey(first), first);
+    assert.equal(mod.ensureRoomKey(), first);
+    assert.equal(global.localStorage.getItem('splitscreenRoomKey'), first);
+});
+
+test('ensureRoomKey replaces an invalid stored key', () => {
+    const mod = freshPlugin();
+    global.localStorage.setItem('splitscreenRoomKey', 'not a key!!');
+    const key = mod.ensureRoomKey();
+    assert.notEqual(key, 'not a key!!');
+    assert.equal(mod.normalizeRoomKey(key), key);
+});
+
+test('buildShareUrl joins origin and key, stripping trailing slashes', () => {
+    const { buildShareUrl } = freshPlugin();
+    assert.equal(buildShareUrl('http://192.168.1.20:8000', 'K7TR4M'), 'http://192.168.1.20:8000/?ss=K7TR4M');
+    assert.equal(buildShareUrl('http://192.168.1.20:8000/', 'K7TR4M'), 'http://192.168.1.20:8000/?ss=K7TR4M');
+});
+
+test('getSyncUrl targets the core relay endpoint, wss under https', () => {
+    assert.equal(freshPlugin().getSyncUrl('K7TR4M'), 'ws://localhost:8420/ws/sync/K7TR4M');
+    assert.equal(freshPlugin({ protocol: 'https:' }).getSyncUrl('K7TR4M'), 'wss://localhost:8420/ws/sync/K7TR4M');
+});
+
+test('makeRemoteFollowerCfg builds a remote FOLLOWER with detect stripped', () => {
+    const { makeRemoteFollowerCfg } = freshPlugin();
+    const cfg = makeRemoteFollowerCfg({
+        type: 'config',
+        filename: 'song.sloppak',
+        cfg: {
+            // `mode` uses the _captureMode() encoding (`viz:<pluginId>`), the
+            // shape a real relay config carries — NOT the saved-prefs
+            // `__viz__:` sentinel form.
+            arrangement: 2, mode: 'viz:highway_3d', inverted: 1, lefty: true,
+            mastery: 0.7, lyrics: true, barHidden: true, name: 'Lead',
+            detectChannel: 'left', detectDeviceName: 'Scarlett', detectVerifierOffsetMs: 40,
+        },
+    }, 'lan-abc');
+    assert.equal(cfg.remote, true);
+    assert.equal(cfg.popupId, 'lan-abc');
+    assert.equal(cfg.filename, 'song.sloppak');
+    assert.equal(cfg.arrangement, 2);
+    assert.equal(cfg.mode, 'viz:highway_3d');
+    assert.equal(cfg.inverted, true);
+    assert.equal(cfg.lefty, true);
+    assert.equal(cfg.mastery, 0.7);
+    assert.equal(cfg.lyrics, true);
+    assert.equal(cfg.barHidden, true);
+    assert.equal(cfg.name, 'Lead');
+    // Viewers are passive mirrors — never inherit the host's mic bindings.
+    assert.equal(cfg.detectChannel, 'mono');
+    assert.equal(cfg.detectDeviceName, '');
+    assert.equal(cfg.detectVerifierOffsetMs, 0);
+});
+
+test('makeRemoteFollowerCfg defaults sanely on a minimal config message', () => {
+    const { makeRemoteFollowerCfg } = freshPlugin();
+    const cfg = makeRemoteFollowerCfg({ type: 'config', filename: 'x.sloppak' }, '');
+    assert.equal(cfg.remote, true);
+    assert.equal(cfg.arrangement, 0);
+    assert.equal(cfg.mode, '2d');
+    assert.equal(cfg.inverted, false);
+    assert.equal(Number.isNaN(cfg.mastery), true);
+});
+
+test('loading with ?ss=<key> under the node test harness does not boot or throw', () => {
+    // Modern node DOES ship a global WebSocket, so the runtime gates the
+    // remote-join boot (and share auto-resume) behind _nodeTestEnv — this
+    // pins that the module loads inertly under the harness and still
+    // exports its helpers, rather than opening real sockets / building DOM.
+    const mod = freshPlugin({ search: '?ss=k7tr4m' });
+    assert.equal(typeof mod.getSyncUrl, 'function');
+});
