@@ -3217,16 +3217,55 @@ try {
         } catch (_) {}
     }
 
+    // Copy with a non-secure-context fallback. LAN hosts are frequently plain
+    // http (e.g. a Docker session at http://192.168.x.x), where
+    // navigator.clipboard does not exist — fall back to the classic
+    // hidden-textarea + execCommand('copy') path. Resolves true on success.
+    function _copyTextToClipboard(text) {
+        return new Promise((resolve) => {
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(
+                        () => resolve(true),
+                        () => resolve(_copyViaExecCommand(text)));
+                    return;
+                }
+            } catch (_) {}
+            resolve(_copyViaExecCommand(text));
+        });
+    }
+    function _copyViaExecCommand(text) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            ta.remove();
+            return ok;
+        } catch (_) {
+            return false;
+        }
+    }
+
     // Share dialog: the room key big (the part someone reads aloud), the join
     // URL(s), Copy, and Stop sharing. On desktop, the preload's network API
     // supplies the machine's LAN addresses (the renderer itself loads from
     // 127.0.0.1, which is useless to other devices); in a plain browser /
     // Docker session, location.origin is already the address the viewer needs.
     let _lanShareModalEl = null;
+    let _lanShareModalSeq = 0;   // invocation nonce — see the await note below
     function _closeLanShareModal() {
         if (_lanShareModalEl) { try { _lanShareModalEl.remove(); } catch (_) {} _lanShareModalEl = null; }
     }
     async function _showLanShareModal() {
+        // The getLanAccess() await below yields: a second invocation entering
+        // meanwhile would otherwise stack a second overlay on top of this
+        // one's (the sync close-at-entry can't see a not-yet-appended modal).
+        // Only the latest invocation is allowed to render.
+        const seq = ++_lanShareModalSeq;
         _closeLanShareModal();
         const key = _lanShare ? _lanShare.key : ensureRoomKey();
 
@@ -3244,6 +3283,7 @@ try {
                 }
             }
         } catch (_) {}
+        if (seq !== _lanShareModalSeq) return;   // superseded while awaiting
 
         const overlay = document.createElement('div');
         overlay.id = 'ss-lan-share-modal';
@@ -3301,11 +3341,13 @@ try {
         };
         const copyBtn = mkBtn('Copy URL');
         copyBtn.onclick = () => {
-            const text = urls[0];
-            const done = () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy URL'; }, 1500); };
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => {});
-            } catch (_) {}
+            const flash = (label) => {
+                copyBtn.textContent = label;
+                setTimeout(() => { copyBtn.textContent = 'Copy URL'; }, 2000);
+            };
+            _copyTextToClipboard(urls[0]).then((ok) => {
+                flash(ok ? 'Copied!' : 'Copy failed — select it above');
+            });
         };
         btnRow.appendChild(copyBtn);
         if (_lanShare) {
