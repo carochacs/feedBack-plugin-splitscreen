@@ -70,6 +70,22 @@ Every popup has a small toolbar pinned to its bottom edge with a **Layout** pick
 
 > Pop-out uses standard `window.open` and `BroadcastChannel`. The popup must be triggered by your click (a user gesture) so popup blockers should leave it alone — but if your browser does block it (or doesn't support `BroadcastChannel`), the panel stays put and you get a brief notice instead. If you close the main window while popups are open, each popup detects it and shows a "main window closed" notice so you know to close it (best-effort — if the browser doesn't deliver that last message the popup just freezes, same as before).
 
+### Sharing a panel to other devices on your network (📡 LAN)
+
+Where **⇱ Pop** opens a follower window on *this* machine, **📡 LAN** (next to it, top-right of every panel) lets a browser on **another machine** — a laptop, a tablet, a TV browser — watch that panel live, synced to this machine's playback. The room hears one audio source (yours); each viewer gets their own screen-sized highway.
+
+Click **📡 LAN** and you get a dialog with a six-character **room key** (e.g. `K7TR4M`) and a join URL like `http://192.168.1.20:8000/?ss=K7TR4M`. Read the key across the room or have viewers type the URL once and **bookmark it — the key is permanent** for your install (see below), so next session they just tap the bookmark. Viewers are *mirrors*, not moves: the panel stays in your layout, and the viewer window can re-split itself (Single/Top-Bottom/Left-Right/Quad) without affecting you. Note-detection is never forwarded to viewers, and viewers have no Dock button.
+
+The **room key** is generated once and saved (Settings → Split Screen shows it, with a **Regenerate** button that rotates it — invalidating old bookmarks). Sharing survives crashes and restarts: if the app (or just the tab) goes down mid-song, viewers show "Reconnecting…" and recover automatically when you're back — the share re-arms itself on launch. Ending it is explicit: **Stop sharing** in the LAN dialog, which tells every viewer the session is over.
+
+Requirements & caveats:
+
+- The server must be reachable on your LAN. On the desktop app, enable **LAN access** (Plugin Manager → Network); Docker/standalone servers just need the port reachable. Your OS firewall may prompt once.
+- Needs a server with the `/ws/sync` relay endpoint (feedBack ≥ the #1030 relay). On an older server, LAN sharing simply won't connect; everything else is unaffected.
+- Viewer devices need WebGL2 for the 3D highway (any recent tablet/laptop is fine; the renderer auto-scales on weak GPUs).
+- Browsers only keep screens awake on secure pages, so a tablet viewing over plain `http://` may sleep mid-song — tap it awake, or raise the device's screen-timeout for the session.
+- If your machine's LAN IP changes (DHCP), bookmarked URLs go stale — give it a DHCP reservation in your router if that bites.
+
 ## Settings
 
 Open **Settings → Split Screen** to pick the default layout (Top/Bottom, Left/Right, Tri 1+2, Tri 2+1, or Quad). The choice is stored in `localStorage` as `splitscreenLayout` and applies the next time you toggle split screen on.
