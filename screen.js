@@ -1316,8 +1316,28 @@ try {
         };
     }
 
+    // sizeCanvases() reads #section-map's height every time it runs, but is
+    // only ever called from window resize / activation / layout-change /
+    // controls-toggle — not when the Section Map bar (an independent plugin)
+    // changes its OWN height/visibility on its own schedule. Lazily attach a
+    // ResizeObserver to it (retried on every sizeCanvases() call until the
+    // element exists, since that plugin may not have built its bar yet the
+    // first time this runs) so panels reflow whenever it does, not just on
+    // the next window resize.
+    let _sectionMapObserver = null;
+    function _watchSectionMap() {
+        if (_sectionMapObserver || typeof ResizeObserver !== 'function') return;
+        const sm = document.getElementById('section-map');
+        if (!sm) return;
+        _sectionMapObserver = new ResizeObserver(() => {
+            if (active && !FOLLOWER) sizeCanvases();
+        });
+        _sectionMapObserver.observe(sm);
+    }
+
     function sizeCanvases() {
         if (!wrap || !panels.length) return;
+        _watchSectionMap();
         // Bottom chrome is #player-footer (wraps #player-controls + the Section
         // Practice bar) on current cores; fall back to #player-controls alone on
         // older cores that have no footer wrapper.
@@ -2761,11 +2781,18 @@ try {
         }
     }
 
-    // Called from the popup when the user clicks Dock. Posts the panel's
-    // current state back to the main window, then closes. Sets _followerDocking
-    // so the beforeunload handler skips the redundant `closed` post — `docked`
-    // already tells the main to re-instate the panel, and a trailing `closed`
-    // could race ahead of a deferred _redockPanel and drop the popups entry.
+    // Called from the popup when the user clicks Dock. Posts state back to the
+    // main window, then closes. Sets _followerDocking so the beforeunload
+    // handler skips the redundant `closed` post — `docked` already tells the
+    // main to re-instate the panel(s), and a trailing `closed` could race
+    // ahead of a deferred _redockPanel and drop the popups entry.
+    //
+    // The popup can itself be split into up to 4 sub-panels (rebuildFollowerLayout).
+    // `popups` on the main side tracks one entry per popup WINDOW, not per
+    // sub-panel, so we capture EVERY current sub-panel here (`finalStates`,
+    // plural) rather than just the one whose Dock button was clicked —
+    // otherwise closing the window on a single sub-panel's dock silently
+    // discards the other 1-3 sub-panels' state.
     function dockFollowerPanel(panel) {
         if (!FOLLOWER) return;
         if (FOLLOWER.remote) return;   // LAN viewers have nothing to dock into
@@ -2776,7 +2803,12 @@ try {
                 ch.postMessage({
                     type: 'docked',
                     popupId: FOLLOWER.popupId,
+                    // Keep `finalState` (singular) for the common 1-panel-popup
+                    // case / older main builds; add `finalStates` (all of this
+                    // popup's current sub-panels, in on-screen order) for the
+                    // multi-panel case.
                     finalState: _captureFollowerConfig(panel),
+                    finalStates: panels.map(p => _captureFollowerConfig(p)),
                 });
             }
         } catch (_) {}
@@ -3008,7 +3040,7 @@ try {
             // reflows the final panel set including the redocked one.
             while (_pendingRedocks.length && !_starting) {
                 const r = _pendingRedocks.shift();
-                _redockPanel(r.popupId, r.finalState);
+                _redockPanel(r.popupId, r.finalState, r.finalStates);
             }
             // Drain a queued rebuild from rebuildLayout. Only fire if the
             // session is still active — a failed start above already did
@@ -3475,7 +3507,7 @@ try {
             if (ch) ch.onmessage = (ev) => {
                 const msg = ev.data || {};
                 if (msg.type === 'docked' && msg.popupId && popups.has(msg.popupId)) {
-                    _redockPanel(msg.popupId, msg.finalState || null);
+                    _redockPanel(msg.popupId, msg.finalState || null, msg.finalStates || null);
                 } else if (msg.type === 'closed' && msg.popupId && popups.has(msg.popupId)) {
                     // Popup was closed without an explicit Dock click. Treat
                     // the panel as removed; don't re-add. Just drop the entry —
@@ -3500,43 +3532,83 @@ try {
     // Re-instate a panel that was popped out, using the original config
     // we captured at pop-out time, overlaid with anything the popup told
     // us via `finalState`.
-    function _redockPanel(popupId, finalState) {
+    // Smallest LAYOUTS entry with room for `n` panels; falls back to the
+    // largest available layout if nothing fits (caller must then truncate).
+    function _bestFitLayout(n) {
+        let best = null;
+        for (const k of Object.keys(LAYOUTS)) {
+            if (LAYOUTS[k].panels >= n && (!best || LAYOUTS[k].panels < LAYOUTS[best].panels)) best = k;
+        }
+        if (best) return best;
+        return Object.keys(LAYOUTS).reduce((a, b) => (LAYOUTS[b].panels > LAYOUTS[a].panels ? b : a));
+    }
+
+    function _redockPanel(popupId, finalState, finalStates) {
         // A start (e.g. the rebuild that follows a pop-out) is in flight —
         // tearing down now would race the in-flight panel build. Queue it;
         // startSplitScreen's finally drains _pendingRedocks. Don't delete
         // the popups entry yet — the deferred call needs it.
-        if (_starting) { _pendingRedocks.push({ popupId, finalState }); return; }
+        if (_starting) { _pendingRedocks.push({ popupId, finalState, finalStates }); return; }
         const entry = popups.get(popupId);
         if (!entry) return;
         popups.delete(popupId);
         if (!currentFilename) return;
 
-        // Decide where to slot the redocked panel back. If split is currently
-        // active, capture the running prefs and append; otherwise start split
-        // fresh with just this one panel.
-        const merged = Object.assign({}, entry.originalConfig, finalState || {});
-        const arrName = _modeToArrName(merged.mode, arrangements[merged.arrangement]?.name || '');
-        const newPrefs = {
-            arrName,
-            // Restore the per-panel toggles captured at pop-out time (and
-            // optionally overlaid with whatever the popup last reported via
-            // finalState) instead of forcing fresh defaults.
-            lyrics: !!merged.lyrics,
-            inverted: !!merged.inverted,
-            lefty: !!merged.lefty,
-            detectChannel: merged.detectChannel || 'mono',
-            detectDeviceName: merged.detectDeviceName || '',
-            detectVerifierOffsetMs: Number.isFinite(merged.detectVerifierOffsetMs) ? merged.detectVerifierOffsetMs : 0,
-            barHidden: !!merged.barHidden,
-            mastery: Number.isFinite(merged.mastery) ? merged.mastery : 1,
-        };
+        // A popup that split itself into multiple sub-panels sends `finalStates`
+        // (one capture per sub-panel, in on-screen order); fall back to the
+        // single `finalState` for older/1-panel popups. Only the FIRST state
+        // is merged against `entry.originalConfig` (the panel that was
+        // originally popped out) — the rest were created fresh inside the
+        // popup's own layout and have no corresponding pre-pop-out config to
+        // merge against; their captures are already self-sufficient (see
+        // _captureFollowerConfig).
+        const states = (Array.isArray(finalStates) && finalStates.length > 0)
+            ? finalStates
+            : [finalState || {}];
+
+        const newPrefsList = states.map((state, i) => {
+            const merged = i === 0 ? Object.assign({}, entry.originalConfig, state || {}) : (state || {});
+            const arrName = _modeToArrName(merged.mode, arrangements[merged.arrangement]?.name || '');
+            return {
+                arrName,
+                // Restore the per-panel toggles captured at pop-out time (and
+                // optionally overlaid with whatever the popup last reported)
+                // instead of forcing fresh defaults.
+                lyrics: !!merged.lyrics,
+                inverted: !!merged.inverted,
+                lefty: !!merged.lefty,
+                detectChannel: merged.detectChannel || 'mono',
+                detectDeviceName: merged.detectDeviceName || '',
+                detectVerifierOffsetMs: Number.isFinite(merged.detectVerifierOffsetMs) ? merged.detectVerifierOffsetMs : 0,
+                barHidden: !!merged.barHidden,
+                mastery: Number.isFinite(merged.mastery) ? merged.mastery : 1,
+            };
+        });
 
         let savedPrefs;
         if (active) {
             savedPrefs = captureCurrentPrefs();
-            savedPrefs.push(newPrefs);
+            savedPrefs.push(...newPrefsList);
         } else {
-            savedPrefs = [newPrefs];
+            savedPrefs = newPrefsList;
+        }
+
+        // Grow the layout to fit everything being redocked — otherwise
+        // startSplitScreen only builds LAYOUTS[layout].panels slots and the
+        // newly-docked panel(s) at the tail of savedPrefs are silently
+        // dropped when the current layout is already at (or near) capacity.
+        const fit = _bestFitLayout(savedPrefs.length);
+        if (LAYOUTS[fit].panels > (LAYOUTS[layout]?.panels || 0)) {
+            layout = fit;
+            try { localStorage.setItem('splitscreenLayout', layout); } catch (_) {}
+        }
+        if (savedPrefs.length > LAYOUTS[layout].panels) {
+            // Every layout is full (4-panel max) — keep what fits, drop the
+            // rest rather than silently discarding via the modulo in
+            // startSplitScreen with no explanation.
+            const dropped = savedPrefs.length - LAYOUTS[layout].panels;
+            savedPrefs = savedPrefs.slice(0, LAYOUTS[layout].panels);
+            _showMainToast('Only room for ' + LAYOUTS[layout].panels + ' panels — ' + dropped + ' docked panel' + (dropped === 1 ? '' : 's') + ' dropped.');
         }
 
         if (active) {
