@@ -1,6 +1,6 @@
-# Slopsmith Plugin: Split Screen
+# feedBack Plugin: Split Screen
 
-A plugin for [Slopsmith](https://github.com/got-feedback/feedBack) that shows 2–4 highway panels side-by-side during playback, each rendering a different arrangement of the same song. Practice lead and rhythm at once, watch bass against lead, or run a quad view of every arrangement a song has.
+A plugin for [feedBack](https://github.com/got-feedback/feedBack) that shows 2–4 highway panels side-by-side during playback, each rendering a different arrangement of the same song. Practice lead and rhythm at once, watch bass against lead, or run a quad view of every arrangement a song has.
 
 ## Features
 
@@ -22,12 +22,12 @@ A plugin for [Slopsmith](https://github.com/got-feedback/feedBack) that shows 2�
 ## Installation
 
 ```bash
-cd /path/to/slopsmith/plugins
-git clone https://github.com/topkoa/slopsmith-plugin-splitscreen.git splitscreen
+cd /path/to/feedBack/plugins
+git clone https://github.com/carochacs/feedBack-plugin-splitscreen.git splitscreen
 docker compose restart
 ```
 
-**Compatibility** — splitscreen runs on any Slopsmith core. On cores with the `highway:visibility` plugin API (~0.2.7.1+), a visualization plugin that mounts a sibling overlay — e.g. the 3D Highway's WebGL overlay — hides itself cleanly while splitscreen is active. On older cores that overlay may bleed through the panels; update the core (and the 3D Highway plugin) to fix it.
+**Compatibility** — splitscreen runs on any feedBack core. On cores with the `highway:visibility` plugin API (~0.2.7.1+), a visualization plugin that mounts a sibling overlay — e.g. the 3D Highway's WebGL overlay — hides itself cleanly while splitscreen is active. On older cores that overlay may bleed through the panels; update the core (and the 3D Highway plugin) to fix it.
 
 ## Usage
 
@@ -305,7 +305,7 @@ Messages arrive in the order listed above. Do not start rendering until you rece
 
 ## Requirements
 
-- Slopsmith with the highway factory (`createHighway()`) and `setRenderer` support exposed on `window` — available in all recent builds (slopsmith#36)
+- feedBack with the highway factory (`createHighway()`) and `setRenderer` support exposed on `window` — available in all recent builds (slopsmith#36)
 - A song with ≥2 arrangements to see any benefit; 1-arrangement songs simply render the same view in every panel
 
 ## Other Plugins
