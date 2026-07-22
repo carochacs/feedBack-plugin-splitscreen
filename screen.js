@@ -3375,6 +3375,7 @@ try {
     //  Main-window broadcaster / listener for popped-out panels
     // ══════════════════════════════════════════════════════════════════════
     let _mainChannelListenerAttached = false;
+    let _mainAudioListenersEl = null;   // the <audio> the play/pause listeners are bound to
     // Broadcast the current play/pause state to any popups so they can pause
     // their time extrapolation precisely (instead of relying solely on the
     // "audio time stopped advancing" heuristic + backstop). Best-effort: in
@@ -3392,30 +3393,38 @@ try {
     }
     function _ensureMainBroadcasterAndListener() {
         if (FOLLOWER) return;            // never run in popup
-        if (_mainChannelListenerAttached) return;
-        _mainChannelListenerAttached = true;
-        // The BroadcastChannel leg is popup-only; a LAN-only share still needs
-        // the audio play/pause listeners below, so a missing channel (no
-        // BroadcastChannel support) no longer bails the whole function.
-        const ch = _ssChannel();
-        if (ch) ch.onmessage = (ev) => {
-            const msg = ev.data || {};
-            if (msg.type === 'docked' && msg.popupId && popups.has(msg.popupId)) {
-                _redockPanel(msg.popupId, msg.finalState || null);
-            } else if (msg.type === 'closed' && msg.popupId && popups.has(msg.popupId)) {
-                // Popup was closed without an explicit Dock click. Treat
-                // the panel as removed; don't re-add. Just drop the entry —
-                // unless a redock for it is already queued (a `docked` arrived
-                // while a start was in flight). The popup suppresses this post
-                // when docking, so that only happens with an older popup build;
-                // belt-and-suspenders.
-                if (!_pendingRedocks.some(r => r.popupId === msg.popupId)) {
-                    popups.delete(msg.popupId);
+        // Two independently-guarded halves. The channel handler is once-ever;
+        // the audio play/pause listeners re-attempt on every call, keyed to
+        // the element they're bound to — a crash-recovery resume can run this
+        // before #audio exists (early load), and a single shared flag would
+        // then swallow the listeners forever, silencing every `playstate`
+        // message (which followers rely on precisely when `time` ticks stop).
+        if (!_mainChannelListenerAttached) {
+            _mainChannelListenerAttached = true;
+            // The BroadcastChannel leg is popup-only; a LAN-only share still
+            // needs the audio play/pause listeners below, so a missing channel
+            // (no BroadcastChannel support) doesn't bail the whole function.
+            const ch = _ssChannel();
+            if (ch) ch.onmessage = (ev) => {
+                const msg = ev.data || {};
+                if (msg.type === 'docked' && msg.popupId && popups.has(msg.popupId)) {
+                    _redockPanel(msg.popupId, msg.finalState || null);
+                } else if (msg.type === 'closed' && msg.popupId && popups.has(msg.popupId)) {
+                    // Popup was closed without an explicit Dock click. Treat
+                    // the panel as removed; don't re-add. Just drop the entry —
+                    // unless a redock for it is already queued (a `docked` arrived
+                    // while a start was in flight). The popup suppresses this post
+                    // when docking, so that only happens with an older popup build;
+                    // belt-and-suspenders.
+                    if (!_pendingRedocks.some(r => r.popupId === msg.popupId)) {
+                        popups.delete(msg.popupId);
+                    }
                 }
-            }
-        };
+            };
+        }
         const audio = document.getElementById('audio');
-        if (audio) {
+        if (audio && _mainAudioListenersEl !== audio) {
+            _mainAudioListenersEl = audio;
             audio.addEventListener('play', _broadcastMainPlayState);
             audio.addEventListener('pause', _broadcastMainPlayState);
         }

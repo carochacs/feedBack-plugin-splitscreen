@@ -259,9 +259,11 @@ test('makeRemoteFollowerCfg defaults sanely on a minimal config message', () => 
     assert.equal(Number.isNaN(cfg.mastery), true);
 });
 
-test('loading with ?ss=<key> in a WebSocket-less environment does not boot or throw', () => {
-    // Node harness has no WebSocket — the remote-join boot must be skipped,
-    // and the module must still load and export its helpers.
+test('loading with ?ss=<key> under the node test harness does not boot or throw', () => {
+    // Modern node DOES ship a global WebSocket, so the runtime gates the
+    // remote-join boot (and share auto-resume) behind _nodeTestEnv — this
+    // pins that the module loads inertly under the harness and still
+    // exports its helpers, rather than opening real sockets / building DOM.
     const mod = freshPlugin({ search: '?ss=k7tr4m' });
     assert.equal(typeof mod.getSyncUrl, 'function');
 });
