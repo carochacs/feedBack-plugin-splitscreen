@@ -224,7 +224,10 @@ test('makeRemoteFollowerCfg builds a remote FOLLOWER with detect stripped', () =
         type: 'config',
         filename: 'song.sloppak',
         cfg: {
-            arrangement: 2, mode: '__viz__:highway_3d', inverted: 1, lefty: true,
+            // `mode` uses the _captureMode() encoding (`viz:<pluginId>`), the
+            // shape a real relay config carries — NOT the saved-prefs
+            // `__viz__:` sentinel form.
+            arrangement: 2, mode: 'viz:highway_3d', inverted: 1, lefty: true,
             mastery: 0.7, lyrics: true, barHidden: true, name: 'Lead',
             detectChannel: 'left', detectDeviceName: 'Scarlett', detectVerifierOffsetMs: 40,
         },
@@ -233,7 +236,7 @@ test('makeRemoteFollowerCfg builds a remote FOLLOWER with detect stripped', () =
     assert.equal(cfg.popupId, 'lan-abc');
     assert.equal(cfg.filename, 'song.sloppak');
     assert.equal(cfg.arrangement, 2);
-    assert.equal(cfg.mode, '__viz__:highway_3d');
+    assert.equal(cfg.mode, 'viz:highway_3d');
     assert.equal(cfg.inverted, true);
     assert.equal(cfg.lefty, true);
     assert.equal(cfg.mastery, 0.7);

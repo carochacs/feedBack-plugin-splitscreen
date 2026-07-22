@@ -3983,13 +3983,23 @@ try {
             }
         } else if (msg.type === 'song-changed' && msg.filename && msg.filename !== currentFilename) {
             _handleFollowerSongChange(msg.filename);
-        } else if (msg.type === 'config' && remote && msg.filename) {
+        } else if (msg.type === 'config' && remote && msg.filename && msg.popupId === _remotePopupId) {
             // Config replies also arrive after a relay reconnect (we re-hello
-            // on every open): treat as recovery — dismiss the waiting overlay,
-            // follow any song change we missed, re-anchor the clock.
+            // on every open) and while waiting out a host restart (the hello
+            // poll keeps running in that state): treat as recovery — dismiss
+            // the waiting overlay, follow any song change we missed, re-anchor
+            // the clock. Guarded to OUR popupId: the relay is a broadcast
+            // room, so replies to other viewers' hellos also arrive here.
             _hideRemoteWaiting();
             if (msg.filename !== currentFilename) _handleFollowerSongChange(msg.filename);
             if (Number.isFinite(msg.t)) _onFollowerTimeMessage(msg.t, msg.playing);
+        }
+        // Any live host traffic while the "waiting for host" overlay is up
+        // proves the host is back (it may resume playing without anyone
+        // sending a fresh hello) — drop the overlay.
+        if (remote && _remoteWaitingShown
+            && (msg.type === 'time' || msg.type === 'playstate' || msg.type === 'song-changed')) {
+            _hideRemoteWaiting();
         }
     }
 
@@ -4611,9 +4621,31 @@ try {
     let _remoteHelloTimer = null;
     let _remotePopupId = '';
     let _remoteWaitingEl = null;
+    let _remoteWaitingShown = false;
+
+    // Hello-poll: runs pre-boot (host may not be sharing / have a song yet)
+    // AND while the waiting overlay is up after a host restart — a relaunched
+    // host that sits paused emits nothing on its own, so polling is what
+    // fetches the config that dismisses the overlay and re-syncs the song.
+    // Self-stops once booted and not waiting.
+    function _remoteStartHelloPoll() {
+        if (_remoteHelloTimer != null) return;
+        _remoteHelloTimer = setInterval(() => {
+            if (FOLLOWER && !_remoteWaitingShown) { _remoteStopHelloPoll(); return; }
+            _remoteSendHello();
+        }, 3000);
+    }
+    function _remoteStopHelloPoll() {
+        if (_remoteHelloTimer != null) {
+            clearInterval(_remoteHelloTimer);
+            _remoteHelloTimer = null;
+        }
+    }
 
     function _showRemoteWaiting(text) {
         if (_followerOrphaned) return;
+        _remoteWaitingShown = true;
+        _remoteStartHelloPoll();
         if (!_remoteWaitingEl) {
             const o = document.createElement('div');
             o.id = 'ss-remote-waiting';
@@ -4637,6 +4669,7 @@ try {
         _remoteWaitingEl.style.display = 'flex';
     }
     function _hideRemoteWaiting() {
+        _remoteWaitingShown = false;   // hello-poll self-stops on its next tick
         if (_remoteWaitingEl) _remoteWaitingEl.style.display = 'none';
     }
 
@@ -4654,15 +4687,7 @@ try {
         ws.onopen = () => {
             _remoteBackoffMs = 1000;
             _remoteSendHello();
-            // Hello-poll until the first config lands — the host may not be
-            // sharing yet, or has no song loaded (it answers hello only once
-            // it can produce a filename). Cleared once FOLLOWER is set.
-            if (_remoteHelloTimer == null) {
-                _remoteHelloTimer = setInterval(() => {
-                    if (FOLLOWER) { clearInterval(_remoteHelloTimer); _remoteHelloTimer = null; return; }
-                    _remoteSendHello();
-                }, 3000);
-            }
+            _remoteStartHelloPoll();   // self-stops once booted and not waiting
         };
         ws.onmessage = (ev) => {
             let msg = null;
@@ -4670,8 +4695,10 @@ try {
             if (!msg) return;
             if (!FOLLOWER) {
                 // Pre-boot: only config (boots us) and share-ended (terminal)
-                // matter; time frames are meaningless without panels.
-                if (msg.type === 'config' && msg.filename) {
+                // matter; time frames are meaningless without panels. Only OUR
+                // hello's reply boots us — the relay room broadcasts every
+                // viewer's config reply to everyone.
+                if (msg.type === 'config' && msg.filename && msg.popupId === _remotePopupId) {
                     FOLLOWER = makeRemoteFollowerCfg(msg, _remotePopupId);
                     _hideRemoteWaiting();
                     bootFollowerMode();
