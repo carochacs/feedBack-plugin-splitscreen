@@ -3935,6 +3935,16 @@ try {
         _followerOrphaned = true;
         _stopFollowerInterp();
         _hideRemoteWaiting();
+        // Tear the remote (LAN) transport down with the viewer: stop the
+        // hello-poll and close the relay socket. Orphaned is terminal — no
+        // reconnect (nulling _remoteWs first makes its onclose a no-op, and
+        // the reconnect scheduler checks _followerOrphaned anyway).
+        _remoteStopHelloPoll();
+        if (_remoteWs) {
+            const w = _remoteWs;
+            _remoteWs = null;
+            try { w.close(); } catch (_) {}
+        }
         try { teardownPanels(); } catch (_) {}   // also stops every panel highway / WS / rAF
         if (_followerToolbar) { try { _followerToolbar.remove(); } catch (_) {} _followerToolbar = null; }
         if (_followerToast) { try { _followerToast.remove(); } catch (_) {} _followerToast = null; }
