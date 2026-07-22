@@ -1,6 +1,6 @@
 # Split Screen Plugin — AI Agent Guide
 
-All logic lives in a single IIFE in `screen.js`. There is no build step, no bundler, no imports. The plugin is loaded as a plain `<script>` tag by slopsmith core, which means every global it needs (`highway`, `createHighway`, `window.playSong`, `window.showScreen`) must already be on `window` when the script executes.
+All logic lives in a single IIFE in `screen.js`. There is no build step, no bundler, no imports. The plugin is loaded as a plain `<script>` tag by feedBack core, which means every global it needs (`highway`, `createHighway`, `window.playSong`, `window.showScreen`) must already be on `window` when the script executes.
 
 ## Module structure
 
@@ -355,7 +355,7 @@ Follow the lyrics/jumping-tab pattern:
 
 ## Git and PR conventions
 
-- All work goes on feature branches off `main` in this repo (`topkoa/slopsmith-plugin-splitscreen`)
-- PRs target `topkoa/slopsmith-plugin-splitscreen` — NOT `got-feedback/feedBack-plugin-splitscreen` (the upstream)
-- Use `gh pr create --repo topkoa/slopsmith-plugin-splitscreen --base main --head topkoa:<branch>` from inside the plugin directory
-- Do not base feature branches on `upstream/main` — the fork and upstream can diverge; always branch from `origin/main`
+- All work goes on feature branches off `main` in this repo (`carochacs/feedBack-plugin-splitscreen`)
+- PRs target `carochacs/feedBack-plugin-splitscreen`
+- Use `gh pr create --repo carochacs/feedBack-plugin-splitscreen --base main --head carochacs:<branch>` from inside the plugin directory
+- Always branch from `origin/main` — there is no separate upstream remote

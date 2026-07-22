@@ -4065,7 +4065,7 @@ try {
             'font-family:sans-serif;text-align:center;padding:24px;';
         const h = document.createElement('div');
         h.style.cssText = 'font-size:18px;font-weight:600;color:#e5e7eb;';
-        h.textContent = title || 'Main Slopsmith window closed';
+        h.textContent = title || 'Main feedBack window closed';
         const sub = document.createElement('div');
         sub.style.cssText = 'font-size:13px;';
         sub.textContent = subText || 'This follower window is no longer synced — you can close it.';
