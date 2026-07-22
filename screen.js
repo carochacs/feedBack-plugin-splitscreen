@@ -1253,6 +1253,15 @@ try {
         hw.setMastery(mastery);
         hw.resize();
         panel.hw = hw;
+
+        // toggleDetect() captures `highway: panel.hw` by value when the detector
+        // is created — leaving it bound to the just-discarded `old` highway
+        // here would orphan it on a stopped instance that never tracks the
+        // new chart. Rebuild it against the fresh `hw` if it was live.
+        if (panel.detector) {
+            toggleDetect(panel);
+            toggleDetect(panel);
+        }
     }
 
     // ── Per-panel viz controls ("3D ⚙" popover) ──
@@ -1467,14 +1476,28 @@ try {
         panel.hw.stop();
         panel.canvas.style.display = 'none';
 
-        // Hide highway-specific buttons and mastery slider
+        // Hide highway-specific buttons and mastery slider. Lyrics/Detect/Channel
+        // are meaningless once the highway is stopped and the canvas is hidden —
+        // leaving lyricsBtn live lets the per-panel lyrics overlay spawn on top
+        // of the full lyrics pane, duplicating the text.
         panel.invertBtn.style.display = 'none';
         panel.leftyBtn.style.display = 'none';
         panel.tabBtn.style.display = 'none';
+        panel.lyricsBtn.style.display = 'none';
+        if (panel.detectBtn) panel.detectBtn.style.display = 'none';
+        if (panel.channelBtn) panel.channelBtn.style.display = 'none';
         panel.masteryHeading.style.display = 'none';
         panel.masterySlider.style.display = 'none';
         panel.masteryLabel.style.display = 'none';
         _hideVizControls(panel);
+        // Destroy the per-panel lyrics overlay so it doesn't stack visibly on
+        // top of the full lyrics pane, duplicating the text. lyricsOverlayOn
+        // is left untouched so the overlay comes back on exit if it was on.
+        if (panel.lyricsOverlay) {
+            panel.lyricsOverlay.destroy();
+            panel.lyricsOverlay.el.remove();
+            panel.lyricsOverlay = null;
+        }
 
         panel.lyricsPane = createLyricsPane(panel.panelDiv);
         panel.lyricsPane.el.style.bottom = (panel.bar.offsetHeight || 28) + 'px';
@@ -1498,6 +1521,9 @@ try {
         panel.invertBtn.style.display = '';
         panel.leftyBtn.style.display = '';
         panel.tabBtn.style.display = '';
+        panel.lyricsBtn.style.display = '';
+        if (panel.detectBtn) panel.detectBtn.style.display = '';
+        if (panel.channelBtn) panel.channelBtn.style.display = '';
         panel.masteryHeading.style.display = '';
         panel.masterySlider.style.display = '';
         panel.masteryLabel.style.display = '';
@@ -1509,6 +1535,13 @@ try {
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
         hookPanelReady(panel);
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
+        // Restore the per-panel lyrics overlay if it was on before entering
+        // lyrics mode.
+        if (panel.lyricsOverlayOn) {
+            panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
+            panel.lyricsOverlay.connect(currentFilename, 0);
+            if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(true);
+        }
         savePanelPrefs();
     }
 
@@ -1524,10 +1557,18 @@ try {
         panel.invertBtn.style.display = 'none';
         panel.leftyBtn.style.display = 'none';
         panel.tabBtn.style.display = 'none';
+        panel.lyricsBtn.style.display = 'none';
+        if (panel.detectBtn) panel.detectBtn.style.display = 'none';
+        if (panel.channelBtn) panel.channelBtn.style.display = 'none';
         panel.masteryHeading.style.display = 'none';
         panel.masterySlider.style.display = 'none';
         panel.masteryLabel.style.display = 'none';
         _hideVizControls(panel);
+        if (panel.lyricsOverlay) {
+            panel.lyricsOverlay.destroy();
+            panel.lyricsOverlay.el.remove();
+            panel.lyricsOverlay = null;
+        }
 
         const jtContainer = document.createElement('div');
         jtContainer.style.cssText =
@@ -1566,6 +1607,9 @@ try {
         panel.invertBtn.style.display = '';
         panel.leftyBtn.style.display = '';
         panel.tabBtn.style.display = '';
+        panel.lyricsBtn.style.display = '';
+        if (panel.detectBtn) panel.detectBtn.style.display = '';
+        if (panel.channelBtn) panel.channelBtn.style.display = '';
         panel.masteryHeading.style.display = '';
         panel.masterySlider.style.display = '';
         panel.masteryLabel.style.display = '';
@@ -1577,6 +1621,11 @@ try {
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
         hookPanelReady(panel);
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
+        if (panel.lyricsOverlayOn) {
+            panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
+            panel.lyricsOverlay.connect(currentFilename, 0);
+            if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(true);
+        }
         savePanelPrefs();
     }
 
@@ -2007,7 +2056,7 @@ try {
             const tv = window.createTabView({
                 container: tabContainer,
                 getBeats: () => panel.hw.getBeats(),
-                getCurrentTime: () => document.getElementById('audio').currentTime,
+                getCurrentTime: () => { const a = document.getElementById('audio'); return a ? a.currentTime : 0; },
             });
             await tv.load(data);
             tv.startSync();
@@ -2432,6 +2481,15 @@ try {
     // (slot collapses; rebuildLayout reflows remaining panels).
     function popOutPanel(panel) {
         if (!currentFilename) return;
+        // A start is in flight (e.g. this is the very first pop-out of the
+        // session and startSplitScreen is still awaiting _vizPluginsReady).
+        // teardownPanels() below would rip out that half-built layout out
+        // from under it — bail instead of racing it, same hazard rebuildLayout()
+        // and _redockPanel() already guard against via `_starting`.
+        if (_starting) {
+            _showMainToast('Split screen is still starting — try popping out again in a moment.');
+            return;
+        }
         const idx = panels.indexOf(panel);
         if (idx === -1) return;
         if (typeof BroadcastChannel !== 'function') {
