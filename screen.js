@@ -1822,6 +1822,13 @@ try {
         if (panel.vizMode) exitVizMode(panel, panel.arrIndex);
         if (panel.jumpingTabMode) exitJumpingTabMode(panel, panel.arrIndex);
         if (panel.tabActive) togglePanelTab(panel);
+        // Detect on/off isn't persisted in prefs (only channel/device/offset
+        // are) — it's a purely in-session toggle. With detectBtn about to be
+        // hidden the user would have no way to stop a live detector while in
+        // this mode, so turn it off (before the highway stops and the button
+        // hides) rather than leave it scoring against an already-stopped
+        // highway with an inaccessible control.
+        if (panel.detector) toggleDetect(panel);
         panel.hw.stop();
         panel.canvas.style.display = 'none';
 
@@ -1909,6 +1916,13 @@ try {
         if (panel.vizMode) exitVizMode(panel, panel.arrIndex);
         if (panel.lyricsMode) exitLyricsMode(panel, panel.arrIndex);
         if (panel.tabActive) togglePanelTab(panel);
+        // Detect on/off isn't persisted in prefs (only channel/device/offset
+        // are) — it's a purely in-session toggle. With detectBtn about to be
+        // hidden the user would have no way to stop a live detector while in
+        // this mode, so turn it off (before the highway stops and the button
+        // hides) rather than leave it scoring against an already-stopped
+        // highway with an inaccessible control.
+        if (panel.detector) toggleDetect(panel);
         panel.hw.stop();
         panel.canvas.style.display = 'none';
 
