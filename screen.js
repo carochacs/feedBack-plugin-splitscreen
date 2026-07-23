@@ -30,11 +30,15 @@ try {
     const OFF_CLASS = 'px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition';
     const ON_CLASS  = 'px-3 py-1.5 bg-blue-900/50 hover:bg-blue-900/60 rounded-lg text-xs text-blue-300 transition';
 
-    // v3 host exposes a stable plugin-control slot (the Plugins rail popover).
+    /**
+     * v3 host exposes a stable plugin-control slot (the Plugins rail popover).
+     */
     function _ssIsV3() {
         return !!(window.slopsmith && window.slopsmith.uiVersion === 'v3');
     }
-    // Returns the slot element in v3, or null (classic UI / unavailable).
+    /**
+     * Returns the slot element in v3, or null (classic UI / unavailable).
+     */
     function _ssPlayerControlSlot() {
         if (!(_ssIsV3() && window.slopsmith.ui && typeof window.slopsmith.ui.playerControlSlot === 'function')) return null;
         try { const s = window.slopsmith.ui.playerControlSlot(); return s instanceof Element ? s : null; }
@@ -88,8 +92,10 @@ try {
     // unbind-all ran before this late bind) from a rebuild (the binding is preserved
     // + likely reused by the new panel, so leave it).
     let _ssRealStopGen = 0;
-    // Allocate the lowest free deviceKey (reusing keys freed by unbind), so
-    // switching devices doesn't leak keys until the pool is exhausted.
+    /**
+     * Allocate the lowest free deviceKey (reusing keys freed by unbind), so
+     * switching devices doesn't leak keys until the pool is exhausted.
+     */
     function _ssResolveDeviceKey(name) {
         if (_ssDeviceKeyByName.has(name)) return _ssDeviceKeyByName.get(name);
         const used = new Set(_ssDeviceKeyByName.values());
@@ -100,19 +106,23 @@ try {
     const _ssAudio = () =>
         (typeof window !== 'undefined' && window.feedBackDesktop && window.feedBackDesktop.audio) || null;
 
-    // Suppress / restore the note_detect default singleton (so it doesn't render a
-    // duplicate HUD over panel 1 in split mode). Prefer the plugin's own setter so the
-    // mechanism stays owned by note_detect; fall back to the shared flag on an older build.
+    /**
+     * Suppress / restore the note_detect default singleton (so it doesn't render a
+     * duplicate HUD over panel 1 in split mode). Prefer the plugin's own setter so the
+     * mechanism stays owned by note_detect; fall back to the shared flag on an older build.
+     */
     function _ssSetDefaultSuppressed(v) {
         const cnd = (typeof window !== 'undefined') ? window.createNoteDetector : null;
         if (cnd && typeof cnd.setDefaultSuppressed === 'function') cnd.setDefaultSuppressed(v);
         else if (typeof window !== 'undefined') window.__ndSuppressDefault = !!v;
     }
 
-    // Unbind an extra device once NO panel is using it, freeing its engine slot +
-    // deviceKey. Called when a panel switches away from a device (or is torn down),
-    // so re-picking devices can't accumulate stale binds (which crossed sources +
-    // duplicated scores). No-op for "" (Main) or a device another panel still uses.
+    /**
+     * Unbind an extra device once NO panel is using it, freeing its engine slot +
+     * deviceKey. Called when a panel switches away from a device (or is torn down),
+     * so re-picking devices can't accumulate stale binds (which crossed sources +
+     * duplicated scores). No-op for "" (Main) or a device another panel still uses.
+     */
     async function _ssMaybeUnbindDevice(name) {
         if (!name) return;
         // Still in use if a panel currently has it OR is mid-bind to it (an in-flight
@@ -199,21 +209,34 @@ try {
     // Defaults to panel 0; clicking another panel transfers focus.
     let focusedPanelIdx = 0;
     const focusListeners = new Set();
+    /**
+     * Focused Panel.
+     */
     function _focusedPanel() {
         if (!active || !panels.length) return null;
         if (focusedPanelIdx >= panels.length) focusedPanelIdx = 0;
         return panels[focusedPanelIdx];
     }
+    /**
+     * Emit Focus Change.
+     */
     function _emitFocusChange() {
         for (const fn of focusListeners) {
             try { fn(); } catch (_) { /* listener errors must not break peers */ }
         }
     }
+    /**
+     * Apply Focus Border.
+     */
     function _applyFocusBorder() {
         for (let i = 0; i < panels.length; i++) {
             panels[i].panelDiv.style.borderColor = i === focusedPanelIdx ? '#4080e0' : '#333';
         }
     }
+    /**
+     * Set Focused Panel.
+     * @param {*} idx
+     */
     function _setFocusedPanel(idx) {
         if (idx < 0 || idx >= panels.length) return;
         if (idx === focusedPanelIdx) return;
@@ -221,6 +244,10 @@ try {
         _applyFocusBorder();
         _emitFocusChange();
     }
+    /**
+     * Find Panel Idx By Canvas.
+     * @param {*} canvas
+     */
     function _findPanelIdxByCanvas(canvas) {
         if (!canvas) return -1;
         for (let i = 0; i < panels.length; i++) {
@@ -236,6 +263,10 @@ try {
     // a viz whether it registered under the new or the legacy global — otherwise a
     // migrated viz (e.g. highway_3d) never shows up here.
     const VIZ_FACTORY_PREFIXES = ['feedBackViz_', 'slopsmithViz_'];
+    /**
+     * Viz Factory.
+     * @param {*} id
+     */
     function vizFactory(id) {
         for (let i = 0; i < VIZ_FACTORY_PREFIXES.length; i++) {
             const f = window[VIZ_FACTORY_PREFIXES[i] + id];
@@ -243,9 +274,16 @@ try {
         }
         return undefined;
     }
+    /**
+     * Has Viz Factory.
+     * @param {*} id
+     */
     function hasVizFactory(id) { return typeof vizFactory(id) === 'function'; }
 
     let _vizPluginsFetchFailed = false;
+    /**
+     * Fetch Viz Plugins.
+     */
     async function fetchVizPlugins() {
         try {
             const resp = await fetch('/api/plugins');
@@ -265,6 +303,9 @@ try {
             _rescanVizPluginsFromWindow();
         }
     }
+    /**
+     * Rescan Viz Plugins From Window.
+     */
     function _rescanVizPluginsFromWindow() {
         const seen = new Set();
         const found = [];
@@ -299,6 +340,9 @@ try {
     // way to surface the missing viz options.
     const _seenVizFactoryIds = new Set();
     let _vizFactoryWatchTimer = null;
+    /**
+     * Start Viz Factory Watch.
+     */
     function _startVizFactoryWatch() {
         if (_vizFactoryWatchTimer) return;
         // Seed with factories already present so the first tick only fires
@@ -343,11 +387,13 @@ try {
     // interaction.
     const _vizPluginsReady = fetchVizPlugins();
 
-    // ── LAN share helpers (splitscreen#21) ──
-    // Declared ABOVE the FOLLOWER/REMOTE_JOIN parse and the settings-sync
-    // block, both of which call into these during IIFE evaluation (the
-    // ROOM_KEY_* consts would otherwise be in their temporal dead zone).
-    // WS URL for the core session-sync relay endpoint (feedBack#1030).
+    /**
+     * ── LAN share helpers (splitscreen#21) ──
+     * Declared ABOVE the FOLLOWER/REMOTE_JOIN parse and the settings-sync
+     * block, both of which call into these during IIFE evaluation (the
+     * ROOM_KEY_* consts would otherwise be in their temporal dead zone).
+     * WS URL for the core session-sync relay endpoint (feedBack#1030).
+     */
     function getSyncUrl(key) {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         return `${proto}//${location.host}/ws/sync/${key}`;
@@ -359,6 +405,9 @@ try {
     // lands in an empty relay room, and the relay rate-caps scanning.
     const ROOM_KEY_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
     const ROOM_KEY_LENGTH = 6;
+    /**
+     * Generate Room Key.
+     */
     function generateRoomKey() {
         let out = '';
         try {
@@ -371,10 +420,12 @@ try {
         return out;
     }
 
-    // Case-insensitive entry: trim + uppercase, then validate against the
-    // alphabet. The filtered alphabet is what makes lookalike tolerance work —
-    // a generated key can never contain 0/O/1/I/L/U, so there is nothing to
-    // mis-map. Returns the canonical uppercase key, or null.
+    /**
+     * Case-insensitive entry: trim + uppercase, then validate against the
+     * alphabet. The filtered alphabet is what makes lookalike tolerance work —
+     * a generated key can never contain 0/O/1/I/L/U, so there is nothing to
+     * mis-map. Returns the canonical uppercase key, or null.
+     */
     function normalizeRoomKey(raw) {
         if (typeof raw !== 'string') return null;
         const key = raw.trim().toUpperCase();
@@ -385,9 +436,11 @@ try {
         return key;
     }
 
-    // The persistent per-install room key (splitscreen#21: saved and reused so
-    // viewer bookmarks keep working across sessions; rotate via the settings
-    // page's Regenerate button).
+    /**
+     * The persistent per-install room key (splitscreen#21: saved and reused so
+     * viewer bookmarks keep working across sessions; rotate via the settings
+     * page's Regenerate button).
+     */
     function ensureRoomKey() {
         let key = null;
         try { key = normalizeRoomKey(localStorage.getItem('splitscreenRoomKey')); } catch (_) {}
@@ -398,15 +451,22 @@ try {
         return key;
     }
 
+    /**
+     * Build Share Url.
+     * @param {*} origin
+     * @param {*} key
+     */
     function buildShareUrl(origin, key) {
         return String(origin).replace(/\/+$/, '') + '/?ss=' + key;
     }
 
-    // Build the FOLLOWER config for a remote viewer from a relay `config`
-    // message. Mirrors the URL-param parse shape, with two deliberate
-    // differences: `remote: true` (gates dock/close semantics) and the
-    // note-detect fields stripped — viewers are passive mirrors and must
-    // never inherit the host's mic/device bindings.
+    /**
+     * Build the FOLLOWER config for a remote viewer from a relay `config`
+     * message. Mirrors the URL-param parse shape, with two deliberate
+     * differences: `remote: true` (gates dock/close semantics) and the
+     * note-detect fields stripped — viewers are passive mirrors and must
+     * never inherit the host's mic/device bindings.
+     */
     function makeRemoteFollowerCfg(msg, popupId) {
         const cfg = (msg && msg.cfg) || {};
         return {
@@ -493,6 +553,9 @@ try {
     })();
     const SS_CHANNEL_NAME = 'slopsmith-ss';
     let ssChannel = null;       // shared BroadcastChannel (lazily opened)
+    /**
+     * Ss Channel.
+     */
     function _ssChannel() {
         if (!ssChannel && typeof BroadcastChannel === 'function') {
             ssChannel = new BroadcastChannel(SS_CHANNEL_NAME);
@@ -602,7 +665,9 @@ try {
             { key: 'cameraLockZoom',  label: 'Locked zoom (In ↔ Out)',   type: 'range',  default: 0.5, min: 0, max: 1, step: 0.05 },
         ],
     };
-    // Range-control bounds with defaults (min/max/step are optional in the descriptor).
+    /**
+     * Range-control bounds with defaults (min/max/step are optional in the descriptor).
+     */
     function _ctlRange(ctl) {
         return {
             lo: Number.isFinite(ctl.min) ? ctl.min : 0,
@@ -610,6 +675,10 @@ try {
             st: Number.isFinite(ctl.step) ? ctl.step : 0.05,
         };
     }
+    /**
+     * Get Panel Controls For.
+     * @param {*} pluginId
+     */
     function getPanelControlsFor(pluginId) {
         // v1: only highway_3d is wired — _vizPanelGet/_vizPanelSet use its
         // localStorage scheme (h3d_bg_panel<N>_<key>) and its window.h3dBgSet*
@@ -666,14 +735,16 @@ try {
         }
     }
 
-    // ── Panel preference persistence ──
-    // Snapshot a live panel into the splitscreenPanelPrefs entry shape. Mode is
-    // encoded into arrName (LYRICS_VALUE / JUMPING_TAB_VALUE:<arr> /
-    // VIZ_PREFIX:<id>:<arr> / plain arrangement name). Single source of truth
-    // for the encoding — used by savePanelPrefs (persist to localStorage),
-    // captureCurrentPrefs (in-memory, for rebuildLayout / _redockPanel) and
-    // popOutPanel (snapshot of the panels left behind). Keep all three on this
-    // helper so a new per-panel field is added once, not three times.
+    /**
+     * ── Panel preference persistence ──
+     * Snapshot a live panel into the splitscreenPanelPrefs entry shape. Mode is
+     * encoded into arrName (LYRICS_VALUE / JUMPING_TAB_VALUE:<arr> /
+     * VIZ_PREFIX:<id>:<arr> / plain arrangement name). Single source of truth
+     * for the encoding — used by savePanelPrefs (persist to localStorage),
+     * captureCurrentPrefs (in-memory, for rebuildLayout / _redockPanel) and
+     * popOutPanel (snapshot of the panels left behind). Keep all three on this
+     * helper so a new per-panel field is added once, not three times.
+     */
     function panelToPrefs(p) {
         return {
             arrName: p.jumpingTabMode
@@ -692,17 +763,24 @@ try {
             name: p.name || '',
         };
     }
+    /**
+     * Save Panel Prefs.
+     */
     function savePanelPrefs() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(panels.map(panelToPrefs)));
     }
 
-    // Notify cross-plugin consumers (e.g. Camera Director's panel selector) that
-    // the panel set or a panel name changed, via the window.feedBack event bus.
+    /**
+     * Notify cross-plugin consumers (e.g. Camera Director's panel selector) that
+     * the panel set or a panel name changed, via the window.feedBack event bus.
+     */
     function _emitPanelsChanged() {
         try { if (window.feedBack && typeof window.feedBack.emit === 'function') window.feedBack.emit('splitscreen:panels-changed'); } catch (_) { /* ignore */ }
     }
-    // Commit an edited panel name (from the bar input): sanitize, store on the
-    // panel, persist, and notify. Empty falls back to the positional default.
+    /**
+     * Commit an edited panel name (from the bar input): sanitize, store on the
+     * panel, persist, and notify. Empty falls back to the positional default.
+     */
     function _commitPanelName(panelDiv, raw) {
         const i = panels.findIndex((p) => p.panelDiv === panelDiv);
         if (i === -1) return;
@@ -714,6 +792,9 @@ try {
         _emitPanelsChanged();
     }
 
+    /**
+     * Load Panel Prefs.
+     */
     function loadPanelPrefs() {
         try {
             return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
@@ -729,6 +810,10 @@ try {
     const PREFS_MIGRATION_KEY = 'splitscreenPrefsMigrationV';
     const PREFS_CURRENT_V = 2;
 
+    /**
+     * Migrate Panel Prefs.
+     * @param {*} prefs
+     */
     function migratePanelPrefs(prefs) {
         if (!Array.isArray(prefs)) return prefs;
         let v = 0;
@@ -756,6 +841,10 @@ try {
         return out;
     }
 
+    /**
+     * Resolve Arr Index.
+     * @param {*} arrName
+     */
     function resolveArrIndex(arrName) {
         if (!arrName || arrName === LYRICS_VALUE || arrName.startsWith(JUMPING_TAB_VALUE) || arrName.startsWith(VIZ_PREFIX + ':')) return -1;
         const lower = arrName.toLowerCase();
@@ -765,7 +854,9 @@ try {
         return -1;
     }
 
-    // ── Helpers ──
+    /**
+     * ── Helpers ──
+     */
     function getWsUrl(filename, arrangement) {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const arrParam = arrangement !== undefined ? `?arrangement=${arrangement}` : '';
@@ -791,6 +882,10 @@ try {
         return `${proto}//${location.host}/ws/highway/${decoded}${arrParam}`;
     }
 
+    /**
+     * Get Default Arrangements.
+     * @param {*} count
+     */
     function getDefaultArrangements(count) {
         // Assign arrangements intelligently: lead, rhythm, bass, then wrap
         const defaults = [];
@@ -816,6 +911,11 @@ try {
     //  Lyrics-only pane renderer
     // ══════════════════════════════════════════════════════════════════════
 
+    /**
+     * Create Lyrics Pane.
+     * @param {*} container
+     * @param {*} opts
+     */
     function createLyricsPane(container, opts) {
         const overlay = !!(opts && opts.overlay);
         const el = document.createElement('div');
@@ -842,6 +942,10 @@ try {
         let ws = null;
         let raf = null;
 
+        /**
+         * Parse Lyrics.
+         * @param {*} data
+         */
         function parseLyrics(data) {
             lyrics = data;
             lines = null;
@@ -884,11 +988,20 @@ try {
             lines = result;
         }
 
+        /**
+         * Syllable Text.
+         * @param {*} s
+         */
         function syllableText(s) {
             const t = s.w || '';
             return (t.endsWith('+') || t.endsWith('-')) ? t.slice(0, -1) : t;
         }
 
+        /**
+         * Render Line.
+         * @param {*} lineData
+         * @param {*} currentTime
+         */
         function renderLine(lineData, currentTime) {
             const frag = document.createDocumentFragment();
             for (const word of lineData.words) {
@@ -914,6 +1027,9 @@ try {
             return frag;
         }
 
+        /**
+         * Render.
+         */
         function render() {
             raf = requestAnimationFrame(render);
             if (!lines || !lines.length) {
@@ -969,6 +1085,11 @@ try {
             }
         }
 
+        /**
+         * Connect.
+         * @param {*} filename
+         * @param {*} arrangement
+         */
         function connect(filename, arrangement) {
             destroy();
             ws = new WebSocket(getWsUrl(filename, arrangement));
@@ -981,6 +1102,9 @@ try {
             raf = requestAnimationFrame(render);
         }
 
+        /**
+         * Destroy.
+         */
         function destroy() {
             if (raf) { cancelAnimationFrame(raf); raf = null; }
             if (ws) { ws.close(); ws = null; }
@@ -994,7 +1118,9 @@ try {
 
     // ══════════════════════════════════════════════════════════════════════
 
-    // ── Layout ──
+    /**
+     * ── Layout ──
+     */
     function createWrap() {
         if (wrap) wrap.remove();
         const player = document.getElementById('player');
@@ -1015,6 +1141,11 @@ try {
         return wrap;
     }
 
+    /**
+     * Apply Layout Style.
+     * @param {*} container
+     * @param {*} layoutKey
+     */
     function applyLayoutStyle(container, layoutKey) {
         // Note: bottom is set dynamically by sizeCanvases() to leave room for global controls
         container.style.cssText =
@@ -1029,6 +1160,12 @@ try {
         }
     }
 
+    /**
+     * Create Panel.
+     * @param {*} index
+     * @param {*} container
+     * @param {*} layoutKey
+     */
     function createPanel(index, container, layoutKey) {
         const panelDiv = document.createElement('div');
         panelDiv.className = 'splitscreen-panel';
@@ -1325,6 +1462,9 @@ try {
     // first time this runs) so panels reflow whenever it does, not just on
     // the next window resize.
     let _sectionMapObserver = null;
+    /**
+     * Watch Section Map.
+     */
     function _watchSectionMap() {
         if (_sectionMapObserver || typeof ResizeObserver !== 'function') return;
         const sm = document.getElementById('section-map');
@@ -1335,6 +1475,9 @@ try {
         _sectionMapObserver.observe(sm);
     }
 
+    /**
+     * Size Canvases.
+     */
     function sizeCanvases() {
         if (!wrap || !panels.length) return;
         _watchSectionMap();
@@ -1359,13 +1502,15 @@ try {
         }
     }
 
-    // ── Highway re-creation (fixes issue #22: charts mix on mid-song arrangement switch) ──
-    // hw.reconnect() / hw.connect() in core close+reopen the WS, but the OLD WS's
-    // onmessage handler is bound with a closure that still references the same
-    // outer-scope `notes`/`chords` arrays. Pending messages from the old socket
-    // can fire after the arrays are cleared, leaking the previous chart's data
-    // into the new arrangement. Replacing the highway instance entirely orphans
-    // the old closure so late messages can't pollute the new chart.
+    /**
+     * ── Highway re-creation (fixes issue #22: charts mix on mid-song arrangement switch) ──
+     * hw.reconnect() / hw.connect() in core close+reopen the WS, but the OLD WS's
+     * onmessage handler is bound with a closure that still references the same
+     * outer-scope `notes`/`chords` arrays. Pending messages from the old socket
+     * can fire after the arrays are cleared, leaking the previous chart's data
+     * into the new arrangement. Replacing the highway instance entirely orphans
+     * the old closure so late messages can't pollute the new chart.
+     */
     function recreatePanelHighway(panel, opts) {
         const old = panel.hw;
         const inverted = old.getInverted();
@@ -1434,13 +1579,15 @@ try {
         _emitPanelsChanged();
     }
 
-    // ── Per-panel viz controls ("3D ⚙" popover) ──
-    // Per-panel values live in the viz plugin's own per-panel localStorage keys
-    // (highway_3d: h3d_bg_panel<N>_<key>, fallback global h3d_bg_<key>) — NOT in
-    // splitscreenPanelPrefs. Writing the per-panel key is enough for the 3D
-    // renderer (it re-reads all settings each frame); for instant-rebuild
-    // settings (palette) we also re-fire the plugin's global setter with its
-    // existing value so _bgEmitChange runs. No global state changes hands.
+    /**
+     * ── Per-panel viz controls ("3D ⚙" popover) ──
+     * Per-panel values live in the viz plugin's own per-panel localStorage keys
+     * (highway_3d: h3d_bg_panel<N>_<key>, fallback global h3d_bg_<key>) — NOT in
+     * splitscreenPanelPrefs. Writing the per-panel key is enough for the 3D
+     * renderer (it re-reads all settings each frame); for instant-rebuild
+     * settings (palette) we also re-fire the plugin's global setter with its
+     * existing value so _bgEmitChange runs. No global state changes hands.
+     */
     function _vizPanelGet(pluginId, panelIdx, ctl) {
         let v = null;
         try {
@@ -1457,6 +1604,13 @@ try {
         }
         return v;
     }
+    /**
+     * Viz Panel Set.
+     * @param {*} pluginId
+     * @param {*} panelIdx
+     * @param {*} ctl
+     * @param {*} value
+     */
     function _vizPanelSet(pluginId, panelIdx, ctl, value) {
         try { localStorage.setItem('h3d_bg_panel' + panelIdx + '_' + ctl.key, String(value)); } catch (_) {}
         // Re-fire the plugin's global setter with the global's *current* value
@@ -1486,6 +1640,11 @@ try {
         try { setter(v); } catch (_) {}
     }
 
+    /**
+     * Build Viz Popover.
+     * @param {*} panel
+     * @param {*} pluginId
+     */
     function buildVizPopover(panel, pluginId) {
         const pop = panel.vizPopover;
         if (!pop) return;
@@ -1548,6 +1707,11 @@ try {
         }
     }
 
+    /**
+     * Show Viz Controls.
+     * @param {*} panel
+     * @param {*} pluginId
+     */
     function _showVizControls(panel, pluginId) {
         if (!panel.vizSettingsBtn) return;
         const ctrls = getPanelControlsFor(pluginId);
@@ -1555,10 +1719,17 @@ try {
         buildVizPopover(panel, pluginId);
         panel.vizSettingsBtn.style.display = '';
     }
+    /**
+     * Hide Viz Controls.
+     * @param {*} panel
+     */
     function _hideVizControls(panel) {
         if (panel.vizSettingsBtn) panel.vizSettingsBtn.style.display = 'none';
         if (panel.vizPopover) { panel.vizPopover.style.display = 'none'; panel.vizPopover.innerHTML = ''; }
     }
+    /**
+     * Close All Viz Popovers.
+     */
     function _closeAllVizPopovers() {
         for (const p of panels) if (p.vizPopover) p.vizPopover.style.display = 'none';
     }
@@ -1569,7 +1740,9 @@ try {
         _closeAllVizPopovers();
     }, true);
 
-    // ── Mastery slider helpers ──
+    /**
+     * ── Mastery slider helpers ──
+     */
     function hookPanelReady(panel) {
         panel.masterySlider.disabled = true;
         panel.masterySlider.style.opacity = '0.4';
@@ -1586,7 +1759,9 @@ try {
         };
     }
 
-    // ── Panel lifecycle ──
+    /**
+     * ── Panel lifecycle ──
+     */
     function populateSelect(panel, arrIndex) {
         // If /api/plugins fetch failed earlier, re-scan window for viz
         // factories every time the dropdown is built — covers viz plugin
@@ -1637,6 +1812,10 @@ try {
         }
     }
 
+    /**
+     * Enter Lyrics Mode.
+     * @param {*} panel
+     */
     function enterLyricsMode(panel) {
         if (panel.lyricsMode) return;
 
@@ -1678,6 +1857,11 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Exit Lyrics Mode.
+     * @param {*} panel
+     * @param {*} arrIndex
+     */
     function exitLyricsMode(panel, arrIndex) {
         if (!panel.lyricsMode) return;
 
@@ -1715,6 +1899,10 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Enter Jumping Tab Mode.
+     * @param {*} panel
+     */
     function enterJumpingTabMode(panel) {
         if (panel.jumpingTabMode) return;
 
@@ -1761,6 +1949,11 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Exit Jumping Tab Mode.
+     * @param {*} panel
+     * @param {*} arrIndex
+     */
     function exitJumpingTabMode(panel, arrIndex) {
         if (!panel.jumpingTabMode) return;
 
@@ -1799,6 +1992,12 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Enter Viz Mode.
+     * @param {*} panel
+     * @param {*} pluginId
+     * @param {*} rendererPreInstalled
+     */
     function enterVizMode(panel, pluginId, rendererPreInstalled) {
         if (panel.vizMode) return;
 
@@ -1857,6 +2056,11 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Exit Viz Mode.
+     * @param {*} panel
+     * @param {*} arrIndex
+     */
     function exitVizMode(panel, arrIndex) {
         if (!panel.vizMode) return;
 
@@ -1893,6 +2097,12 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Init Panel.
+     * @param {*} panel
+     * @param {*} arrIndex
+     * @param {*} prefs
+     */
     function initPanel(panel, arrIndex, prefs) {
         const isLyricsMode = prefs?.arrName === LYRICS_VALUE;
         const isJumpingTabMode = prefs?.arrName?.startsWith(JUMPING_TAB_VALUE) || false;
@@ -2202,6 +2412,10 @@ try {
         }
     }
 
+    /**
+     * Toggle Panel Tab.
+     * @param {*} panel
+     */
     async function togglePanelTab(panel) {
         if (panel.tabActive) {
             // Back to highway
@@ -2260,6 +2474,10 @@ try {
         }
     }
 
+    /**
+     * Toggle Detect.
+     * @param {*} panel
+     */
     function toggleDetect(panel) {
         if (panel.detector) {
             panel.detector.destroy();
@@ -2288,6 +2506,10 @@ try {
         panel.updateDetectStyle(true);
     }
 
+    /**
+     * Cycle Detect Channel.
+     * @param {*} panel
+     */
     function cycleDetectChannel(panel) {
         // mono / left / right only — multi-channel selection (ch3+) is deferred (see
         // DETECT_CHANNEL_CYCLE). Each panel binds its OWN device via the picker, so a
@@ -2301,9 +2523,11 @@ try {
         savePanelPrefs();
     }
 
-    // Nudge a panel's detection-timing offset (ms) and apply it live to its bound
-    // source. Lets the user dial in an extra device's capture latency by watching
-    // the score peak. Clamped to ±250 ms.
+    /**
+     * Nudge a panel's detection-timing offset (ms) and apply it live to its bound
+     * source. Lets the user dial in an extra device's capture latency by watching
+     * the score peak. Clamped to ±250 ms.
+     */
     function _ssNudgeOffset(panel, delta) {
         const next = Math.max(-250, Math.min(250, (panel.detectVerifierOffsetMs || 0) + delta));
         panel.detectVerifierOffsetMs = next;
@@ -2318,8 +2542,10 @@ try {
         savePanelPrefs();
     }
 
-    // Populate + wire the per-panel input DEVICE picker. No-op (and the dropdown
-    // stays hidden) unless the desktop bridge exposes the Phase 2 multi-device API.
+    /**
+     * Populate + wire the per-panel input DEVICE picker. No-op (and the dropdown
+     * stays hidden) unless the desktop bridge exposes the Phase 2 multi-device API.
+     */
     async function setupDevicePicker(panel) {
         const sel = panel.deviceSelect;
         if (!sel) return;
@@ -2377,11 +2603,13 @@ try {
         sel.onchange = () => { _ssApplyDevice(panel, sel.value); };
     }
 
-    // Resolve + bind the chosen device, set the panel's deviceKey, and rebind a live
-    // detector. SERIALIZED per panel: each device change runs after the previous one
-    // fully completes (bind + old-device unbind), so overlapping picks (A then B
-    // before A's bind resolves) can't apply out of order and leave the panel on the
-    // wrong device. Returns the chain tail so callers can await the actual apply.
+    /**
+     * Resolve + bind the chosen device, set the panel's deviceKey, and rebind a live
+     * detector. SERIALIZED per panel: each device change runs after the previous one
+     * fully completes (bind + old-device unbind), so overlapping picks (A then B
+     * before A's bind resolves) can't apply out of order and leave the panel on the
+     * wrong device. Returns the chain tail so callers can await the actual apply.
+     */
     function _ssApplyDevice(panel, name) {
         panel._ssDeviceChain = (panel._ssDeviceChain || Promise.resolve())
             .catch(() => {})
@@ -2389,8 +2617,10 @@ try {
         return panel._ssDeviceChain;
     }
 
-    // "" = primary input. (A source's device is fixed at allocation, so a live
-    // detector is torn down + rebuilt to move it.)
+    /**
+     * "" = primary input. (A source's device is fixed at allocation, so a live
+     * detector is torn down + rebuilt to move it.)
+     */
     async function _ssApplyDeviceImpl(panel, name) {
         // Record the device THIS panel is (about to be) bound to for the whole async
         // operation, BEFORE detectDeviceName is updated — so a concurrent
@@ -2404,6 +2634,11 @@ try {
         }
     }
 
+    /**
+     * Ss Apply Device Body.
+     * @param {*} panel
+     * @param {*} name
+     */
     async function _ssApplyDeviceBody(panel, name) {
         const audio = _ssAudio();
         const startStopGen = _ssRealStopGen;  // detect a REAL stop racing this bind
@@ -2482,6 +2717,11 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Switch Panel Arrangement.
+     * @param {*} panel
+     * @param {*} arrIndex
+     */
     function switchPanelArrangement(panel, arrIndex) {
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
@@ -2491,6 +2731,9 @@ try {
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
     }
 
+    /**
+     * Teardown Panels.
+     */
     function teardownPanels() {
         // Flip active + notify focus listeners up-front. All callers
         // (stopSplitScreen, rebuildLayout, popOutPanel, _redockPanel) need
@@ -2577,6 +2820,10 @@ try {
     //  Pop-out / dock helpers
     // ══════════════════════════════════════════════════════════════════════
 
+    /**
+     * Capture Mode.
+     * @param {*} panel
+     */
     function _captureMode(panel) {
         if (panel.lyricsMode) return 'lyrics';
         if (panel.jumpingTabMode) return 'jt';
@@ -2584,14 +2831,16 @@ try {
         return '2d';
     }
 
-    // Decode a captured panel mode into the saved-prefs `arrName` form.
-    // Shared by _redockPanel and _followerCfgToPrefs so the popup-and-back
-    // round-trip produces the same prefs the main-window flow would.
-    //
-    // Legacy: pre-PR-36 popups encoded 3D Highway as cfg.mode === '3d'
-    // rather than 'viz:highway_3d'. Map it explicitly so a popup that was
-    // opened on an older build and is now docking back lands on the
-    // correct renderer instead of silently falling back to 2D.
+    /**
+     * Decode a captured panel mode into the saved-prefs `arrName` form.
+     * Shared by _redockPanel and _followerCfgToPrefs so the popup-and-back
+     * round-trip produces the same prefs the main-window flow would.
+     *
+     * Legacy: pre-PR-36 popups encoded 3D Highway as cfg.mode === '3d'
+     * rather than 'viz:highway_3d'. Map it explicitly so a popup that was
+     * opened on an older build and is now docking back lands on the
+     * correct renderer instead of silently falling back to 2D.
+     */
     function _modeToArrName(mode, arrNameStr) {
         if (mode === 'lyrics') return LYRICS_VALUE;
         if (mode === 'jt') return JUMPING_TAB_VALUE + ':' + arrNameStr;
@@ -2600,6 +2849,10 @@ try {
         return arrNameStr;
     }
 
+    /**
+     * Capture Follower Config.
+     * @param {*} panel
+     */
     function _captureFollowerConfig(panel) {
         return {
             arrangement: panel.arrIndex || 0,
@@ -2622,6 +2875,9 @@ try {
         };
     }
 
+    /**
+     * New Popup Id.
+     */
     function _newPopupId() {
         try {
             return crypto.randomUUID();
@@ -2634,6 +2890,10 @@ try {
     // for pop-out failures). Top-centre pill, fades in next frame, auto-removes
     // after ~3.5 s; a new call replaces any in-flight one.
     let _mainToastEl = null;
+    /**
+     * Show Main Toast.
+     * @param {*} msg
+     */
     function _showMainToast(msg) {
         try {
             if (_mainToastEl) { _mainToastEl.remove(); _mainToastEl = null; }
@@ -2661,9 +2921,11 @@ try {
         } catch (_) { /* DOM not ready / detached — silently drop */ }
     }
 
-    // Open a popup window pre-configured to show this panel as a follower.
-    // The panel is removed from the main layout once the popup is opened
-    // (slot collapses; rebuildLayout reflows remaining panels).
+    /**
+     * Open a popup window pre-configured to show this panel as a follower.
+     * The panel is removed from the main layout once the popup is opened
+     * (slot collapses; rebuildLayout reflows remaining panels).
+     */
     function popOutPanel(panel) {
         if (!currentFilename) return;
         // A start is in flight (e.g. this is the very first pop-out of the
@@ -2781,18 +3043,20 @@ try {
         }
     }
 
-    // Called from the popup when the user clicks Dock. Posts state back to the
-    // main window, then closes. Sets _followerDocking so the beforeunload
-    // handler skips the redundant `closed` post — `docked` already tells the
-    // main to re-instate the panel(s), and a trailing `closed` could race
-    // ahead of a deferred _redockPanel and drop the popups entry.
-    //
-    // The popup can itself be split into up to 4 sub-panels (rebuildFollowerLayout).
-    // `popups` on the main side tracks one entry per popup WINDOW, not per
-    // sub-panel, so we capture EVERY current sub-panel here (`finalStates`,
-    // plural) rather than just the one whose Dock button was clicked —
-    // otherwise closing the window on a single sub-panel's dock silently
-    // discards the other 1-3 sub-panels' state.
+    /**
+     * Called from the popup when the user clicks Dock. Posts state back to the
+     * main window, then closes. Sets _followerDocking so the beforeunload
+     * handler skips the redundant `closed` post — `docked` already tells the
+     * main to re-instate the panel(s), and a trailing `closed` could race
+     * ahead of a deferred _redockPanel and drop the popups entry.
+     *
+     * The popup can itself be split into up to 4 sub-panels (rebuildFollowerLayout).
+     * `popups` on the main side tracks one entry per popup WINDOW, not per
+     * sub-panel, so we capture EVERY current sub-panel here (`finalStates`,
+     * plural) rather than just the one whose Dock button was clicked —
+     * otherwise closing the window on a single sub-panel's dock silently
+     * discards the other 1-3 sub-panels' state.
+     */
     function dockFollowerPanel(panel) {
         if (!FOLLOWER) return;
         if (FOLLOWER.remote) return;   // LAN viewers have nothing to dock into
@@ -2815,7 +3079,9 @@ try {
         try { window.close(); } catch (_) {}
     }
 
-    // ── Main toggle ──
+    /**
+     * ── Main toggle ──
+     */
     function rebuildLayout() {
         // A start is in flight (e.g. user changed the layout select while the
         // initial start was awaiting _vizPluginsReady). Tearing down now would
@@ -2835,10 +3101,18 @@ try {
         if (wasActive) startSplitScreen(null, savedPrefs);
     }
 
+    /**
+     * Capture Current Prefs.
+     */
     function captureCurrentPrefs() {
         return panels.map(panelToPrefs);
     }
 
+    /**
+     * Start Split Screen.
+     * @param {*} existingArrangements
+     * @param {*} savedPrefs
+     */
     async function startSplitScreen(existingArrangements, savedPrefs) {
         // Re-entrancy guard: prevent concurrent starts from double-clicks,
         // layout rebuilds, or auto-reactivate firing while a start is in flight.
@@ -3052,6 +3326,9 @@ try {
         }
     }
 
+    /**
+     * Stop Split Screen.
+     */
     function stopSplitScreen() {
         savePanelPrefs();
         teardownPanels();  // flips active=false + emits focus change
@@ -3085,6 +3362,9 @@ try {
         stopTimeSync();
     }
 
+    /**
+     * Toggle.
+     */
     function toggle() {
         if (_starting) return; // treat in-flight start as already active
         if (active) {
@@ -3100,6 +3380,9 @@ try {
     // ── Time sync ──
     let syncInterval = null;
 
+    /**
+     * Start Time Sync.
+     */
     function startTimeSync() {
         stopTimeSync();
         const audio = document.getElementById('audio');
@@ -3112,6 +3395,9 @@ try {
         }, 1000 / 60);
     }
 
+    /**
+     * Stop Time Sync.
+     */
     function stopTimeSync() {
         if (syncInterval) {
             clearInterval(syncInterval);
@@ -3132,6 +3418,9 @@ try {
     // when a new popup registers and when the broadcaster stops — see
     // popOutPanel / _stopPopupBroadcaster.
     let _lastBroadcastTime = null;
+    /**
+     * Start Popup Broadcaster.
+     */
     function _startPopupBroadcaster() {
         if (_popupBroadcastInterval) return;
         const audio = document.getElementById('audio');
@@ -3166,6 +3455,9 @@ try {
             }
         }, 1000 / 60);
     }
+    /**
+     * Stop Popup Broadcaster.
+     */
     function _stopPopupBroadcaster() {
         if (_popupBroadcastInterval) {
             clearInterval(_popupBroadcastInterval);
@@ -3200,6 +3492,10 @@ try {
     // indistinguishable while cutting relay traffic to a third.
     const LAN_TIME_MIN_INTERVAL_MS = 50;
 
+    /**
+     * Lan Send.
+     * @param {*} msg
+     */
     function _lanSend(msg) {
         const ws = _lanShare && _lanShare.ws;
         if (!ws || ws.readyState !== 1) return;
@@ -3211,8 +3507,10 @@ try {
         try { ws.send(JSON.stringify(msg)); } catch (_) {}
     }
 
-    // Answer a viewer's `hello`. No song loaded yet → answer nothing; the
-    // viewer hello-polls until a config with a filename can be produced.
+    /**
+     * Answer a viewer's `hello`. No song loaded yet → answer nothing; the
+     * viewer hello-polls until a config with a filename can be produced.
+     */
     function _lanHelloResponse(popupId) {
         if (!_lanShare || !currentFilename) return null;
         const audio = document.getElementById('audio');
@@ -3226,6 +3524,9 @@ try {
         };
     }
 
+    /**
+     * Lan Connect.
+     */
     function _lanConnect() {
         if (!_lanShare || _lanShare.ws) return;
         let ws;
@@ -3249,6 +3550,9 @@ try {
         ws.onerror = () => { try { ws.close(); } catch (_) {} };
     }
 
+    /**
+     * Lan Schedule Reconnect.
+     */
     function _lanScheduleReconnect() {
         if (!_lanShare || _lanShare.retryTimer) return;
         const delay = _lanShare.backoffMs || 1000;
@@ -3260,14 +3564,20 @@ try {
         }, delay);
     }
 
-    // Capture `panel` as the shared config — with the note-detect fields
-    // stripped (viewers are passive mirrors; never forward mic bindings).
+    /**
+     * Capture `panel` as the shared config — with the note-detect fields
+     * stripped (viewers are passive mirrors; never forward mic bindings).
+     */
     function _lanCaptureCfg(panel) {
         return Object.assign(_captureFollowerConfig(panel), {
             detectChannel: 'mono', detectDeviceName: '', detectVerifierOffsetMs: 0,
         });
     }
 
+    /**
+     * Start Lan Share.
+     * @param {*} panel
+     */
     function startLanShare(panel) {
         if (typeof WebSocket !== 'function') {
             _showMainToast('LAN sharing requires WebSocket support.');
@@ -3286,6 +3596,9 @@ try {
         return true;
     }
 
+    /**
+     * Stop Lan Share.
+     */
     function stopLanShare() {
         if (!_lanShare) return;
         _lanSend({ type: 'share-ended' });   // terminal for viewers — before teardown
@@ -3299,9 +3612,11 @@ try {
         } catch (_) {}
     }
 
-    // Re-arm a share that was active when this window last unloaded (crash,
-    // reload, app relaunch) so viewers left open on other devices recover
-    // without any interaction — the crash-recovery contract (splitscreen#21).
+    /**
+     * Re-arm a share that was active when this window last unloaded (crash,
+     * reload, app relaunch) so viewers left open on other devices recover
+     * without any interaction — the crash-recovery contract (splitscreen#21).
+     */
     function _maybeResumeLanShare() {
         if (FOLLOWER || REMOTE_JOIN || _lanShare) return;
         if (typeof WebSocket !== 'function') return;
@@ -3316,10 +3631,12 @@ try {
         } catch (_) {}
     }
 
-    // Copy with a non-secure-context fallback. LAN hosts are frequently plain
-    // http (e.g. a Docker session at http://192.168.x.x), where
-    // navigator.clipboard does not exist — fall back to the classic
-    // hidden-textarea + execCommand('copy') path. Resolves true on success.
+    /**
+     * Copy with a non-secure-context fallback. LAN hosts are frequently plain
+     * http (e.g. a Docker session at http://192.168.x.x), where
+     * navigator.clipboard does not exist — fall back to the classic
+     * hidden-textarea + execCommand('copy') path. Resolves true on success.
+     */
     function _copyTextToClipboard(text) {
         return new Promise((resolve) => {
             try {
@@ -3333,6 +3650,10 @@ try {
             resolve(_copyViaExecCommand(text));
         });
     }
+    /**
+     * Copy Via Exec Command.
+     * @param {*} text
+     */
     function _copyViaExecCommand(text) {
         try {
             const ta = document.createElement('textarea');
@@ -3356,9 +3677,15 @@ try {
     // Docker session, location.origin is already the address the viewer needs.
     let _lanShareModalEl = null;
     let _lanShareModalSeq = 0;   // invocation nonce — see the await note below
+    /**
+     * Close Lan Share Modal.
+     */
     function _closeLanShareModal() {
         if (_lanShareModalEl) { try { _lanShareModalEl.remove(); } catch (_) {} _lanShareModalEl = null; }
     }
+    /**
+     * Show Lan Share Modal.
+     */
     async function _showLanShareModal() {
         // The getLanAccess() await below yields: a second invocation entering
         // meanwhile would otherwise stack a second overlay on top of this
@@ -3475,11 +3802,13 @@ try {
     // ══════════════════════════════════════════════════════════════════════
     let _mainChannelListenerAttached = false;
     let _mainAudioListenersEl = null;   // the <audio> the play/pause listeners are bound to
-    // Broadcast the current play/pause state to any popups so they can pause
-    // their time extrapolation precisely (instead of relying solely on the
-    // "audio time stopped advancing" heuristic + backstop). Best-effort: in
-    // JUCE mode the <audio> element's play/pause events may not fire — the
-    // follower's heuristic still covers that case.
+    /**
+     * Broadcast the current play/pause state to any popups so they can pause
+     * their time extrapolation precisely (instead of relying solely on the
+     * "audio time stopped advancing" heuristic + backstop). Best-effort: in
+     * JUCE mode the <audio> element's play/pause events may not fire — the
+     * follower's heuristic still covers that case.
+     */
     function _broadcastMainPlayState() {
         try {
             const ch = _ssChannel();
@@ -3490,6 +3819,9 @@ try {
             _lanSend(msg);
         } catch (_) {}
     }
+    /**
+     * Ensure Main Broadcaster And Listener.
+     */
     function _ensureMainBroadcasterAndListener() {
         if (FOLLOWER) return;            // never run in popup
         // Two independently-guarded halves. The channel handler is once-ever;
@@ -3529,11 +3861,13 @@ try {
         }
     }
 
-    // Re-instate a panel that was popped out, using the original config
-    // we captured at pop-out time, overlaid with anything the popup told
-    // us via `finalState`.
-    // Smallest LAYOUTS entry with room for `n` panels; falls back to the
-    // largest available layout if nothing fits (caller must then truncate).
+    /**
+     * Re-instate a panel that was popped out, using the original config
+     * we captured at pop-out time, overlaid with anything the popup told
+     * us via `finalState`.
+     * Smallest LAYOUTS entry with room for `n` panels; falls back to the
+     * largest available layout if nothing fits (caller must then truncate).
+     */
     function _bestFitLayout(n) {
         let best = null;
         for (const k of Object.keys(LAYOUTS)) {
@@ -3543,6 +3877,12 @@ try {
         return Object.keys(LAYOUTS).reduce((a, b) => (LAYOUTS[b].panels > LAYOUTS[a].panels ? b : a));
     }
 
+    /**
+     * Redock Panel.
+     * @param {*} popupId
+     * @param {*} finalState
+     * @param {*} finalStates
+     */
     function _redockPanel(popupId, finalState, finalStates) {
         // A start (e.g. the rebuild that follows a pop-out) is in flight —
         // tearing down now would race the in-flight panel build. Queue it;
@@ -3626,6 +3966,9 @@ try {
     // ── Layout cycle button ──
     let layoutBtn = null;
 
+    /**
+     * Create Layout Btn.
+     */
     function createLayoutBtn() {
         if (layoutBtn) return layoutBtn;
         const slot = _ssPlayerControlSlot();
@@ -3662,7 +4005,9 @@ try {
         return layoutBtn;
     }
 
-    // ── Player HUD fade (top-left song title fades out once playback begins) ──
+    /**
+     * ── Player HUD fade (top-left song title fades out once playback begins) ──
+     */
     function showHud() {
         const hud = document.getElementById('player-hud');
         if (!hud) return;
@@ -3670,6 +4015,9 @@ try {
         hud.style.opacity = '1';
     }
 
+    /**
+     * Fade Out Hud.
+     */
     function fadeOutHud() {
         const hud = document.getElementById('player-hud');
         if (!hud) return;
@@ -3677,6 +4025,9 @@ try {
         hud.style.opacity = '0';
     }
 
+    /**
+     * Restore Hud.
+     */
     function restoreHud() {
         const hud = document.getElementById('player-hud');
         if (!hud) return;
@@ -3684,6 +4035,9 @@ try {
         hud.style.opacity = '';
     }
 
+    /**
+     * On Audio Play.
+     */
     function onAudioPlay() {
         if (active) fadeOutHud();
     }
@@ -3703,6 +4057,10 @@ try {
         'viz-picker',
     ];
 
+    /**
+     * Set Redundant Controls Hidden.
+     * @param {*} hide
+     */
     function setRedundantControlsHidden(hide) {
         for (const id of REDUNDANT_CONTROL_IDS) {
             const el = document.getElementById(id);
@@ -3714,6 +4072,9 @@ try {
     let hideBtn = null;
     let floatBtn = null;
 
+    /**
+     * Create Hide Btn.
+     */
     function createHideBtn() {
         if (hideBtn) return hideBtn;
         const slot = _ssPlayerControlSlot();
@@ -3740,6 +4101,9 @@ try {
         return hideBtn;
     }
 
+    /**
+     * Create Floating Show Btn.
+     */
     function createFloatingShowBtn() {
         if (floatBtn) return floatBtn;
         const player = document.getElementById('player');
@@ -3757,6 +4121,10 @@ try {
         return floatBtn;
     }
 
+    /**
+     * Toggle Panel Bar.
+     * @param {*} panel
+     */
     function togglePanelBar(panel) {
         const hiding = panel.bar.style.display !== 'none';
         panel.bar.style.display = hiding ? 'none' : '';
@@ -3786,6 +4154,9 @@ try {
         savePanelPrefs();
     }
 
+    /**
+     * Toggle Controls Visibility.
+     */
     function toggleControlsVisibility() {
         controlsHidden = !controlsHidden;
         localStorage.setItem('splitscreenControlsHidden', controlsHidden);
@@ -3795,7 +4166,9 @@ try {
         updateBtn();
     }
 
-    // ── Toggle button ──
+    /**
+     * ── Toggle button ──
+     */
     function updateBtn() {
         const btn = document.getElementById('btn-splitscreen');
         if (btn) btn.className = active ? ON_CLASS : OFF_CLASS;
@@ -3807,6 +4180,9 @@ try {
         if (floatBtn) floatBtn.style.display = (active && controlsHidden) ? '' : 'none';
     }
 
+    /**
+     * Inject Btn.
+     */
     function injectBtn() {
         // v3: mount split-screen controls into the host's stable plugin-control
         // slot (Plugins rail popover). In v3 the slot is always present, so the
@@ -3991,6 +4367,10 @@ try {
     // backstop in case a `playstate:false` (pause) message is dropped.
     const _FOLLOWER_MAX_EXTRAP_S = 2.0;
 
+    /**
+     * Install Follower Audio Shim.
+     * @param {*} audio
+     */
     function _installFollowerAudioShim(audio) {
         if (!audio) return;
         try {
@@ -4017,9 +4397,11 @@ try {
     // song change — doesn't stack listeners; also covers a hypothetical
     // element swap).
     let _followerPlayGuardEl = null;
-    // Keep the popup's <audio> paused — and re-pause it whenever anything
-    // calls .play() (autoplay, a src swap on song change). Mute alone leaves
-    // it decoding the stream for nothing.
+    /**
+     * Keep the popup's <audio> paused — and re-pause it whenever anything
+     * calls .play() (autoplay, a src swap on song change). Mute alone leaves
+     * it decoding the stream for nothing.
+     */
     function _silenceFollowerAudio(audio) {
         if (!audio) return;
         audio.muted = true;
@@ -4031,9 +4413,11 @@ try {
         }
     }
 
-    // rAF loop that advances _followerCurrentTime between `time` broadcasts
-    // while the main window reports playback. Idempotent; cancelled on
-    // orphan / unload.
+    /**
+     * rAF loop that advances _followerCurrentTime between `time` broadcasts
+     * while the main window reports playback. Idempotent; cancelled on
+     * orphan / unload.
+     */
     function _startFollowerInterp() {
         if (_followerInterpRaf != null) return;
         const tick = () => {
@@ -4049,21 +4433,26 @@ try {
         };
         _followerInterpRaf = requestAnimationFrame(tick);
     }
+    /**
+     * Stop Follower Interp.
+     */
     function _stopFollowerInterp() {
         if (_followerInterpRaf != null) { cancelAnimationFrame(_followerInterpRaf); _followerInterpRaf = null; }
     }
 
-    // Handle a `time` broadcast: derive playback rate vs wall-time, re-anchor,
-    // fan the value out to every panel highway.
-    //
-    // The most reliable "is it playing" signal is observing the broadcast
-    // clock itself advance in real time (dT/dWall ≈ playbackRate) — that works
-    // regardless of whether the main window's <audio>.paused is meaningful
-    // (it isn't, in JUCE mode). The optional `playing` flag on the message is
-    // only used to STOP extrapolating when the clock has also stalled: it lets
-    // us tell "main paused" from "main tab throttled to ~1 Hz" within the gap
-    // between messages, which the clock alone can't. The 2 s extrapolation
-    // backstop covers the case where the flag is absent/unreliable.
+    /**
+     * Handle a `time` broadcast: derive playback rate vs wall-time, re-anchor,
+     * fan the value out to every panel highway.
+     *
+     * The most reliable "is it playing" signal is observing the broadcast
+     * clock itself advance in real time (dT/dWall ≈ playbackRate) — that works
+     * regardless of whether the main window's <audio>.paused is meaningful
+     * (it isn't, in JUCE mode). The optional `playing` flag on the message is
+     * only used to STOP extrapolating when the clock has also stalled: it lets
+     * us tell "main paused" from "main tab throttled to ~1 Hz" within the gap
+     * between messages, which the clock alone can't. The 2 s extrapolation
+     * backstop covers the case where the flag is absent/unreliable.
+     */
     function _onFollowerTimeMessage(t, playing) {
         const nowP = performance.now();
         let advancedInRealtime = false;
@@ -4103,7 +4492,9 @@ try {
         _maybeDismissFollowerToastOnPlay(t);
     }
 
-    // Handle an explicit play/pause notice from the main window.
+    /**
+     * Handle an explicit play/pause notice from the main window.
+     */
     function _onFollowerPlayState(playing) {
         _followerPlaying = playing;
         if (playing) {
@@ -4118,8 +4509,10 @@ try {
         }
     }
 
-    // The main window is closing — stop syncing, tear the panels down, and
-    // tell the user. Idempotent.
+    /**
+     * The main window is closing — stop syncing, tear the panels down, and
+     * tell the user. Idempotent.
+     */
     function _onFollowerOrphaned(title, subText) {
         if (_followerOrphaned) return;
         _followerOrphaned = true;
@@ -4155,9 +4548,11 @@ try {
         document.body.appendChild(o);
     }
 
-    // Shared message dispatch for both follower transports: the local
-    // BroadcastChannel (popup windows) and the LAN relay WebSocket (remote
-    // viewers). Reads live module state, so it survives layout rebuilds.
+    /**
+     * Shared message dispatch for both follower transports: the local
+     * BroadcastChannel (popup windows) and the LAN relay WebSocket (remote
+     * viewers). Reads live module state, so it survives layout rebuilds.
+     */
     function _followerBusHandler(msg) {
         if (_followerOrphaned || !msg) return;
         const remote = !!(FOLLOWER && FOLLOWER.remote);
@@ -4207,6 +4602,9 @@ try {
     // handler can re-assert mute/pause + re-shim without re-querying.
     let _followerAudio = null;
 
+    /**
+     * Boot Follower Mode.
+     */
     function bootFollowerMode() {
         // Hide non-panel chrome with a single CSS rule so we don't have to
         // chase every element id slopsmith renders. The follower wrap covers
@@ -4300,12 +4698,14 @@ try {
         });
     }
 
-    // Load `filename` in the popup, wait for it to be ready, then build the
-    // follower panels from `cfgs`. Used both on initial bootstrap
-    // (cfgs = [FOLLOWER]) and on song-change (cfgs = current panel states).
-    // The popup's main highway is shared across all panels for time / song
-    // info purposes; per-panel arrangement is set inside each panel's own
-    // WebSocket via initPanel.
+    /**
+     * Load `filename` in the popup, wait for it to be ready, then build the
+     * follower panels from `cfgs`. Used both on initial bootstrap
+     * (cfgs = [FOLLOWER]) and on song-change (cfgs = current panel states).
+     * The popup's main highway is shared across all panels for time / song
+     * info purposes; per-panel arrangement is set inside each panel's own
+     * WebSocket via initPanel.
+     */
     async function loadSongInFollower(filename, cfgs) {
         const firstArr = (cfgs[0] && cfgs[0].arrangement) || 0;
         try {
@@ -4343,6 +4743,9 @@ try {
         _buildFollowerToolbar();
     }
 
+    /**
+     * Wait For Highway Ready.
+     */
     function waitForHighwayReady() {
         return new Promise(resolve => {
             const info = highway.getSongInfo();
@@ -4384,8 +4787,10 @@ try {
     let _followerLayoutKey = 'follower';
     const FOLLOWER_TOOLBAR_H = 32;
 
-    // Convert a captured panel config (cfg) and arrIdx into the prefs
-    // shape that initPanel expects.
+    /**
+     * Convert a captured panel config (cfg) and arrIdx into the prefs
+     * shape that initPanel expects.
+     */
     function _followerCfgToPrefs(cfg, arrIdx) {
         const arrName = _modeToArrName(cfg.mode, arrangements[arrIdx]?.name || '');
         return {
@@ -4405,10 +4810,12 @@ try {
         };
     }
 
-    // Build N panels per `layoutKey` into the wrap div. `cfgs` is an array
-    // of panel configs (one per slot); slots beyond cfgs.length get smart
-    // defaults via getDefaultArrangements. Replaces the older single-panel
-    // buildFollowerPanel so the popup can host any of the standard layouts.
+    /**
+     * Build N panels per `layoutKey` into the wrap div. `cfgs` is an array
+     * of panel configs (one per slot); slots beyond cfgs.length get smart
+     * defaults via getDefaultArrangements. Replaces the older single-panel
+     * buildFollowerPanel so the popup can host any of the standard layouts.
+     */
     function buildFollowerLayout(cfgs, layoutKey) {
         layoutKey = FOLLOWER_LAYOUT_PANELS[layoutKey] ? layoutKey : 'follower';
         _followerLayoutKey = layoutKey;
@@ -4537,6 +4944,9 @@ try {
     // Built once per popup, the layout selector triggers rebuild of the
     // panel grid.
     let _followerToolbar = null;
+    /**
+     * Build Follower Toolbar.
+     */
     function _buildFollowerToolbar() {
         if (_followerToolbar) return _followerToolbar;
         const bar = document.createElement('div');
@@ -4578,9 +4988,11 @@ try {
         return bar;
     }
 
-    // Rebuild the popup's panel grid into a new layout. Captures the
-    // current panels' configs so existing slots survive the change; new
-    // slots fill with smart defaults via getDefaultArrangements.
+    /**
+     * Rebuild the popup's panel grid into a new layout. Captures the
+     * current panels' configs so existing slots survive the change; new
+     * slots fill with smart defaults via getDefaultArrangements.
+     */
     function rebuildFollowerLayout(newLayoutKey) {
         if (!FOLLOWER_LAYOUT_PANELS[newLayoutKey]) return;
         if (_followerRebuildBusy) {
@@ -4602,19 +5014,23 @@ try {
         buildFollowerLayout(cfgs, newLayoutKey);
     }
 
-    // Capture every popup panel's current state into an array of cfgs,
-    // suitable for handing back to loadSongInFollower / buildFollowerLayout.
-    // Reads from the live panels so any user changes since pop-out or
-    // last layout change are honoured.
+    /**
+     * Capture every popup panel's current state into an array of cfgs,
+     * suitable for handing back to loadSongInFollower / buildFollowerLayout.
+     * Reads from the live panels so any user changes since pop-out or
+     * last layout change are honoured.
+     */
     function _captureAllFollowerConfigs() {
         return panels.map(p => _captureFollowerConfig(p));
     }
 
-    // Rebuild the follower panels for a new song while preserving the
-    // user's layout + per-panel mode + arrangement choices. Triggered by
-    // the main window's `song-changed` broadcast. Single-flight: a change
-    // arriving while one is in progress is coalesced — only the latest
-    // pending filename runs after the current rebuild finishes.
+    /**
+     * Rebuild the follower panels for a new song while preserving the
+     * user's layout + per-panel mode + arrangement choices. Triggered by
+     * the main window's `song-changed` broadcast. Single-flight: a change
+     * arriving while one is in progress is coalesced — only the latest
+     * pending filename runs after the current rebuild finishes.
+     */
     async function _handleFollowerSongChange(newFilename) {
         if (_followerOrphaned) return;
         if (_followerRebuildBusy) { _followerPendingFilename = newFilename; return; }
@@ -4660,11 +5076,13 @@ try {
     let _followerToast = null;
     let _followerToastBaselineTime = 0;
 
-    // Common-tuning name resolver. Order-agnostic — works whether the
-    // tuning array is high-to-low or low-to-high (we test both ends for
-    // the drop pattern). Returns null for anything that isn't a flat
-    // uniform offset or a one-string drop variant; the caller falls
-    // back to displaying raw offsets in that case.
+    /**
+     * Common-tuning name resolver. Order-agnostic — works whether the
+     * tuning array is high-to-low or low-to-high (we test both ends for
+     * the drop pattern). Returns null for anything that isn't a flat
+     * uniform offset or a one-string drop variant; the caller falls
+     * back to displaying raw offsets in that case.
+     */
     function _resolveFollowerTuningName(tuning) {
         if (!Array.isArray(tuning) || tuning.length === 0) return null;
         const STANDARD_NAMES = {
@@ -4699,6 +5117,9 @@ try {
         return null;
     }
 
+    /**
+     * Dismiss Follower Toast.
+     */
     function _dismissFollowerToast() {
         if (!_followerToast) return;
         const toast = _followerToast;
@@ -4710,11 +5131,13 @@ try {
         }, FOLLOWER_TOAST_FADE_MS);
     }
 
-    // Called from the time-broadcast handler. Dismisses the toast the
-    // first time the main window's audio.currentTime advances past the
-    // baseline captured at toast-creation — i.e. play has actually
-    // started. While main is paused at the new song's start (t = 0),
-    // every broadcast carries the same t and the toast stays visible.
+    /**
+     * Called from the time-broadcast handler. Dismisses the toast the
+     * first time the main window's audio.currentTime advances past the
+     * baseline captured at toast-creation — i.e. play has actually
+     * started. While main is paused at the new song's start (t = 0),
+     * every broadcast carries the same t and the toast stays visible.
+     */
     function _maybeDismissFollowerToastOnPlay(t) {
         if (!_followerToast) return;
         if (t > _followerToastBaselineTime + FOLLOWER_TOAST_PLAY_THRESHOLD_S) {
@@ -4722,6 +5145,10 @@ try {
         }
     }
 
+    /**
+     * Show Follower Song Toast.
+     * @param {*} info
+     */
     function _showFollowerSongToast(info) {
         if (!info) return;
         // Replace any existing toast (rapid song-change sequence).
@@ -4823,11 +5250,13 @@ try {
     let _remoteWaitingEl = null;
     let _remoteWaitingShown = false;
 
-    // Hello-poll: runs pre-boot (host may not be sharing / have a song yet)
-    // AND while the waiting overlay is up after a host restart — a relaunched
-    // host that sits paused emits nothing on its own, so polling is what
-    // fetches the config that dismisses the overlay and re-syncs the song.
-    // Self-stops once booted and not waiting.
+    /**
+     * Hello-poll: runs pre-boot (host may not be sharing / have a song yet)
+     * AND while the waiting overlay is up after a host restart — a relaunched
+     * host that sits paused emits nothing on its own, so polling is what
+     * fetches the config that dismisses the overlay and re-syncs the song.
+     * Self-stops once booted and not waiting.
+     */
     function _remoteStartHelloPoll() {
         if (_remoteHelloTimer != null) return;
         _remoteHelloTimer = setInterval(() => {
@@ -4835,6 +5264,9 @@ try {
             _remoteSendHello();
         }, 3000);
     }
+    /**
+     * Remote Stop Hello Poll.
+     */
     function _remoteStopHelloPoll() {
         if (_remoteHelloTimer != null) {
             clearInterval(_remoteHelloTimer);
@@ -4842,6 +5274,10 @@ try {
         }
     }
 
+    /**
+     * Show Remote Waiting.
+     * @param {*} text
+     */
     function _showRemoteWaiting(text) {
         if (_followerOrphaned) return;
         _remoteWaitingShown = true;
@@ -4868,17 +5304,26 @@ try {
         if (t) t.textContent = text || 'Connecting…';
         _remoteWaitingEl.style.display = 'flex';
     }
+    /**
+     * Hide Remote Waiting.
+     */
     function _hideRemoteWaiting() {
         _remoteWaitingShown = false;   // hello-poll self-stops on its next tick
         if (_remoteWaitingEl) _remoteWaitingEl.style.display = 'none';
     }
 
+    /**
+     * Remote Send Hello.
+     */
     function _remoteSendHello() {
         if (_remoteWs && _remoteWs.readyState === 1) {
             try { _remoteWs.send(JSON.stringify({ type: 'hello', popupId: _remotePopupId })); } catch (_) {}
         }
     }
 
+    /**
+     * Remote Connect.
+     */
     function _remoteConnect() {
         if (_followerOrphaned) return;
         let ws;
@@ -4922,6 +5367,9 @@ try {
         ws.onerror = () => { try { ws.close(); } catch (_) {} };
     }
 
+    /**
+     * Remote Schedule Reconnect.
+     */
     function _remoteScheduleReconnect() {
         if (_followerOrphaned) return;
         const delay = _remoteBackoffMs;
@@ -4931,6 +5379,9 @@ try {
         }, delay);
     }
 
+    /**
+     * Boot Remote Join.
+     */
     function bootRemoteJoin() {
         _remotePopupId = 'lan-' + _newPopupId();
         _showRemoteWaiting('Connecting to host…');
