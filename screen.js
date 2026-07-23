@@ -1835,6 +1835,12 @@ try {
         panel.lyricsBtn.style.display = 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = 'none';
         if (panel.channelBtn) panel.channelBtn.style.display = 'none';
+        // Detect on/off isn't persisted in prefs (only channel/device/offset
+        // are) — it's a purely in-session toggle. With detectBtn hidden the
+        // user has no way to stop a live detector while in this mode, so turn
+        // it off rather than leave it silently scoring against a stopped
+        // highway with an inaccessible control.
+        if (panel.detector) toggleDetect(panel);
         panel.masteryHeading.style.display = 'none';
         panel.masterySlider.style.display = 'none';
         panel.masteryLabel.style.display = 'none';
@@ -1918,6 +1924,12 @@ try {
         panel.lyricsBtn.style.display = 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = 'none';
         if (panel.channelBtn) panel.channelBtn.style.display = 'none';
+        // Detect on/off isn't persisted in prefs (only channel/device/offset
+        // are) — it's a purely in-session toggle. With detectBtn hidden the
+        // user has no way to stop a live detector while in this mode, so turn
+        // it off rather than leave it silently scoring against a stopped
+        // highway with an inaccessible control.
+        if (panel.detector) toggleDetect(panel);
         panel.masteryHeading.style.display = 'none';
         panel.masterySlider.style.display = 'none';
         panel.masteryLabel.style.display = 'none';
