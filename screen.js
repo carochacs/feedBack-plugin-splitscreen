@@ -3906,7 +3906,10 @@ try {
         const entry = popups.get(popupId);
         if (!entry) return;
         popups.delete(popupId);
-        if (!currentFilename) return;
+        if (!currentFilename) {
+            _showMainToast('Could not dock panel — no song is currently loaded.');
+            return;
+        }
 
         // A popup that split itself into multiple sub-panels sends `finalStates`
         // (one capture per sub-panel, in on-screen order); fall back to the
