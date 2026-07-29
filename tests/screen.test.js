@@ -267,3 +267,63 @@ test('loading with ?ss=<key> under the node test harness does not boot or throw'
     const mod = freshPlugin({ search: '?ss=k7tr4m' });
     assert.equal(typeof mod.getSyncUrl, 'function');
 });
+
+// ── LAYOUTS / applyLayoutStyle (splitscreen#1: CSS grid fix for the
+// non-interactive-panel bug) ──────────────────────────────────────────────
+test('multi-panel layouts (tri/quad/five/six) are CSS grid, not flex-wrap', () => {
+    const { LAYOUTS } = freshPlugin();
+    for (const key of ['tri-top', 'tri-bottom', 'quad', 'five', 'six']) {
+        assert.equal(LAYOUTS[key].style, 'grid', `${key} should use grid`);
+        assert.ok(Number.isInteger(LAYOUTS[key].cols) && LAYOUTS[key].cols > 0, `${key}.cols`);
+        assert.ok(Number.isInteger(LAYOUTS[key].rows) && LAYOUTS[key].rows > 0, `${key}.rows`);
+    }
+    // top-bottom/left-right stay flex (2-panel layouts never hit the
+    // %-height-in-flex-wrap ambiguity since they don't wrap onto a 2nd row).
+    assert.equal(LAYOUTS['top-bottom'].style, 'flex-col');
+    assert.equal(LAYOUTS['left-right'].style, 'flex-row');
+});
+
+test('applyLayoutStyle sets a grid template sized from cols/rows for quad', () => {
+    const { applyLayoutStyle } = freshPlugin();
+    const container = { style: {} };
+    applyLayoutStyle(container, 'quad');
+    assert.match(container.style.cssText, /display:grid/);
+    assert.match(container.style.cssText, /grid-template-columns:repeat\(2,1fr\)/);
+    assert.match(container.style.cssText, /grid-template-rows:repeat\(2,1fr\)/);
+});
+
+test('applyLayoutStyle uses a 6-column grid for five, 3-column for six', () => {
+    const { applyLayoutStyle } = freshPlugin();
+    const five = { style: {} };
+    applyLayoutStyle(five, 'five');
+    assert.match(five.style.cssText, /grid-template-columns:repeat\(6,1fr\)/);
+    assert.match(five.style.cssText, /grid-template-rows:repeat\(2,1fr\)/);
+
+    const six = { style: {} };
+    applyLayoutStyle(six, 'six');
+    assert.match(six.style.cssText, /grid-template-columns:repeat\(3,1fr\)/);
+    assert.match(six.style.cssText, /grid-template-rows:repeat\(2,1fr\)/);
+});
+
+test('applyLayoutStyle still uses flex for the 2-panel layouts', () => {
+    const { applyLayoutStyle } = freshPlugin();
+    const topBottom = { style: {} };
+    applyLayoutStyle(topBottom, 'top-bottom');
+    assert.match(topBottom.style.cssText, /display:flex/);
+    assert.equal(topBottom.style.flexDirection, 'column');
+
+    const leftRight = { style: {} };
+    applyLayoutStyle(leftRight, 'left-right');
+    assert.match(leftRight.style.cssText, /display:flex/);
+    assert.equal(leftRight.style.flexDirection, 'row');
+});
+
+test('_bestFitLayout picks the smallest layout with room, and caps at six', () => {
+    const { _bestFitLayout } = freshPlugin();
+    assert.equal(_bestFitLayout(1), 'top-bottom');
+    assert.equal(_bestFitLayout(3), 'tri-top');
+    assert.equal(_bestFitLayout(4), 'quad');
+    assert.equal(_bestFitLayout(5), 'five');
+    assert.equal(_bestFitLayout(6), 'six');
+    assert.equal(_bestFitLayout(7), 'six'); // nothing bigger — caller must truncate
+});
