@@ -1134,6 +1134,9 @@ try {
         const player = document.getElementById('player');
         wrap = document.createElement('div');
         wrap.id = 'splitscreen-wrap';
+        // Start transparent so startSplitScreen() can fade it in once panels
+        // are ready/sized — avoids a jarring hard cut into split mode.
+        wrap.style.opacity = '0';
         // The wrap is position:absolute relative to #player, so it must be a
         // direct child of #player. Anchor it before the bottom chrome. Core
         // (slopsmith#719) wraps #player-controls in a #player-footer div, so
@@ -1167,12 +1170,12 @@ try {
             // grid-template-columns/rows size cells from the container's
             // available space directly, bypassing % height resolution entirely.
             container.style.cssText =
-                'position:absolute;top:0;left:0;right:0;z-index:3;display:grid;' +
+                'position:absolute;top:0;left:0;right:0;z-index:3;display:grid;opacity:0;' +
                 'grid-template-columns:repeat(' + cfg.cols + ',1fr);' +
                 'grid-template-rows:repeat(' + cfg.rows + ',1fr);';
         } else {
             container.style.cssText =
-                'position:absolute;top:0;left:0;right:0;z-index:3;display:flex;';
+                'position:absolute;top:0;left:0;right:0;z-index:3;display:flex;opacity:0;';
             if (layoutKey === 'top-bottom') {
                 container.style.flexDirection = 'column';
             } else if (layoutKey === 'left-right') {
@@ -3324,6 +3327,14 @@ try {
 
         // Hook into the time sync loop
         startTimeSync();
+
+        // Fade the wrap in now that all panels are built and sized — matches
+        // the fade pattern used elsewhere in this codebase (_showMainToast,
+        // player HUD) so entering split isn't a jarring hard cut.
+        if (wrap) {
+            wrap.style.transition = 'opacity 0.15s ease-in';
+            wrap.style.opacity = '1';
+        }
         } catch (err) {
             // Rollback any partial state so the UI doesn't get stuck with
             // active=true, default highway hidden, and no panels — that's
@@ -3411,6 +3422,23 @@ try {
     }
 
     /**
+     * Fade the wrap out, then run the real stop once the transition has had
+     * time to play. Only used for the user-initiated Stop (toggle()) — the
+     * navigation-driven auto-stop paths (song change, leaving the player)
+     * call stopSplitScreen() directly and synchronously, since those rely on
+     * `active` flipping immediately (e.g. before a new song's _play() runs).
+     */
+    function _fadeOutWrapThenStop() {
+        if (wrap) {
+            wrap.style.transition = 'opacity 0.12s ease-out';
+            wrap.style.opacity = '0';
+            setTimeout(stopSplitScreen, 130);
+            return;
+        }
+        stopSplitScreen();
+    }
+
+    /**
      * Toggle.
      */
     function toggle() {
@@ -3419,7 +3447,7 @@ try {
             // User-intent off — persist so navigation-driven stops (song
             // switch, leaving player) don't erase the user's on-state.
             try { localStorage.setItem('splitscreenActive', 'false'); } catch (_) {}
-            stopSplitScreen();
+            _fadeOutWrapThenStop();
         } else {
             startSplitScreen();
         }
