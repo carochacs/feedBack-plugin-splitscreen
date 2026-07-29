@@ -3131,6 +3131,22 @@ try {
     }
 
     /**
+     * Dock every currently popped-out panel back into this window at once.
+     * Broadcasts a `dock-all` request rather than reaching into each popup's
+     * state directly — every live popup reacts via its own dockFollowerPanel
+     * (the SAME per-panel path its own Dock button uses), so each redock
+     * carries the popup's actual live sub-panel state and closes itself, and
+     * `_redockPanel`'s existing `_starting` single-flight queue (main side)
+     * already serialises concurrent `docked` replies safely — no extra guard
+     * needed here for the bulk case.
+     */
+    function dockAllPanels() {
+        if (popups.size === 0) return;
+        const ch = _ssChannel();
+        if (ch) ch.postMessage({ type: 'dock-all' });
+    }
+
+    /**
      * ── Main toggle ──
      */
     function rebuildLayout() {
@@ -3509,9 +3525,11 @@ try {
             // forced close / OS kill): otherwise their slot lingers and we'd
             // keep broadcasting to nobody at 60 Hz indefinitely. popup.closed
             // is a cheap same-origin boolean.
+            let _reaped = false;
             for (const [id, e] of popups) {
-                if (e.popup && e.popup.closed) popups.delete(id);
+                if (e.popup && e.popup.closed) { popups.delete(id); _reaped = true; }
             }
+            if (_reaped) updateBtn(); // keep Dock all's visibility in sync promptly
             if (popups.size === 0 && !_lanShare) { _stopPopupBroadcaster(); return; }
             // Only broadcast when the playhead actually moved — skips ~60
             // redundant structured-clone messages/sec (and the follower's
@@ -4152,6 +4170,7 @@ try {
     // ── Hide/show controls bar ──
     let hideBtn = null;
     let floatBtn = null;
+    let dockAllBtn = null;
 
     /**
      * Create Hide Btn.
@@ -4180,6 +4199,29 @@ try {
             c.appendChild(hideBtn);
         }
         return hideBtn;
+    }
+
+    /**
+     * Create Dock All Btn. A bulk "dock every popped-out panel" control,
+     * visible only while >=1 panel is currently popped out (see updateBtn).
+     */
+    function createDockAllBtn() {
+        if (dockAllBtn) return dockAllBtn;
+        const slot = _ssPlayerControlSlot();
+        const c = slot || document.getElementById('player-controls');
+        if (!c) return null;
+        if (_ssIsV3() && !slot) return null;  // v3 mounts exclusively into the slot
+        dockAllBtn = document.createElement('button');
+        dockAllBtn.id = 'btn-splitscreen-dock-all';
+        dockAllBtn.className = OFF_CLASS;
+        dockAllBtn.textContent = '⇲ Dock all';
+        dockAllBtn.title = 'Dock every popped-out panel back into this window';
+        dockAllBtn.style.display = 'none';
+        dockAllBtn.onclick = dockAllPanels;
+        const closeBtn = c.querySelector('button[onclick*="showScreen"]');
+        if (closeBtn) c.insertBefore(dockAllBtn, closeBtn);
+        else c.appendChild(dockAllBtn);
+        return dockAllBtn;
     }
 
     /**
@@ -4259,6 +4301,11 @@ try {
             hideBtn.textContent = controlsHidden ? '▴ Bar' : '▾ Bar';
         }
         if (floatBtn) floatBtn.style.display = (active && controlsHidden) ? '' : 'none';
+        // Independent of `active`: popping out every panel can leave split
+        // mode inactive in the main window (popOutPanel's last-panel-popped
+        // path calls stopSplitScreen()) while the popup(s) are still live —
+        // Dock all must stay visible so the user can get them back.
+        if (dockAllBtn) dockAllBtn.style.display = popups.size > 0 ? '' : 'none';
     }
 
     /**
@@ -4291,6 +4338,7 @@ try {
         createLayoutBtn();
         createHideBtn();
         createFloatingShowBtn();
+        createDockAllBtn();
     }
 
     // ── Resize handler ──
@@ -4652,6 +4700,13 @@ try {
             } else {
                 _onFollowerOrphaned();
             }
+        } else if (msg.type === 'dock-all') {
+            // Main window's "Dock all" button asked every live popup to dock
+            // itself. Reuse the exact single-panel dock path (dockFollowerPanel)
+            // so this popup's live state — not a stale pop-out-time snapshot —
+            // is what gets redocked; remote LAN viewers have nothing to dock
+            // into and dockFollowerPanel already no-ops for them.
+            if (!remote && panels.length) dockFollowerPanel(panels[0]);
         } else if (msg.type === 'share-ended') {
             if (remote) {
                 _onFollowerOrphaned('Sharing ended',
