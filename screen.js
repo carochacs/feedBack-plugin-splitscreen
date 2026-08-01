@@ -22,9 +22,17 @@ try {
     const LAYOUTS = {
         'top-bottom':  { panels: 2, style: 'flex-col' },
         'left-right':  { panels: 2, style: 'flex-row' },
-        'tri-top':     { panels: 3, style: 'grid-tri' },
-        'tri-bottom':  { panels: 3, style: 'grid-tri' },
-        'quad':        { panels: 4, style: 'grid-2x2' },
+        // tri-top/tri-bottom/quad/five/six use CSS grid (cols x rows), not flex —
+        // see applyLayoutStyle for why: flex-wrap:wrap + %-height items inside a
+        // container whose height comes from position insets (not an explicit
+        // height) left wrapped rows non-interactive in some browsers.
+        'tri-top':     { panels: 3, cols: 2, rows: 2, style: 'grid' },
+        'tri-bottom':  { panels: 3, cols: 2, rows: 2, style: 'grid' },
+        'quad':        { panels: 4, cols: 2, rows: 2, style: 'grid' },
+        // 'five' uses a 6-column grid so top-row panels can span 3/6 (half) and
+        // bottom-row panels span 2/6 (a third) — the LCM of 2 and 3 columns.
+        'five':        { panels: 5, cols: 6, rows: 2, style: 'grid' },
+        'six':         { panels: 6, cols: 3, rows: 2, style: 'grid' },
     };
 
     const OFF_CLASS = 'px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition';
@@ -1126,6 +1134,9 @@ try {
         const player = document.getElementById('player');
         wrap = document.createElement('div');
         wrap.id = 'splitscreen-wrap';
+        // Start transparent so startSplitScreen() can fade it in once panels
+        // are ready/sized — avoids a jarring hard cut into split mode.
+        wrap.style.opacity = '0';
         // The wrap is position:absolute relative to #player, so it must be a
         // direct child of #player. Anchor it before the bottom chrome. Core
         // (slopsmith#719) wraps #player-controls in a #player-footer div, so
@@ -1148,15 +1159,31 @@ try {
      */
     function applyLayoutStyle(container, layoutKey) {
         // Note: bottom is set dynamically by sizeCanvases() to leave room for global controls
-        container.style.cssText =
-            'position:absolute;top:0;left:0;right:0;z-index:3;display:flex;';
-        if (layoutKey === 'top-bottom') {
-            container.style.flexDirection = 'column';
-        } else if (layoutKey === 'left-right') {
-            container.style.flexDirection = 'row';
+        const cfg = LAYOUTS[layoutKey];
+        if (cfg && cfg.style === 'grid') {
+            // CSS grid avoids the flex `height:50%` resolution ambiguity that left
+            // wrapped rows non-interactive: the wrap's height comes from position
+            // insets (top/bottom set by sizeCanvases()), not an explicit height
+            // property, and some browsers treat that as indefinite for % height
+            // resolution inside a flex-wrap container — collapsing or
+            // mis-positioning bottom-row panels so they can't be clicked/focused.
+            // grid-template-columns/rows size cells from the container's
+            // available space directly, bypassing % height resolution entirely.
+            container.style.cssText =
+                'position:absolute;top:0;left:0;right:0;z-index:3;display:grid;opacity:0;' +
+                'grid-template-columns:repeat(' + cfg.cols + ',1fr);' +
+                'grid-template-rows:repeat(' + cfg.rows + ',1fr);';
         } else {
-            container.style.flexDirection = 'row';
-            container.style.flexWrap = 'wrap';
+            container.style.cssText =
+                'position:absolute;top:0;left:0;right:0;z-index:3;display:flex;opacity:0;';
+            if (layoutKey === 'top-bottom') {
+                container.style.flexDirection = 'column';
+            } else if (layoutKey === 'left-right') {
+                container.style.flexDirection = 'row';
+            } else {
+                container.style.flexDirection = 'row';
+                container.style.flexWrap = 'wrap';
+            }
         }
     }
 
@@ -1171,18 +1198,28 @@ try {
         panelDiv.className = 'splitscreen-panel';
         panelDiv.style.cssText = 'position:relative;overflow:hidden;box-sizing:border-box;border:1px solid #333;';
 
-        if (layoutKey === 'quad') {
-            panelDiv.style.width = '50%';
-            panelDiv.style.height = '50%';
+        const _cfg = LAYOUTS[layoutKey];
+        if (_cfg && _cfg.style === 'grid') {
+            // CSS grid sizes the cells — no explicit width/height needed on the
+            // item. min-width/min-height:0 stops the canvas from overflowing its
+            // cell (grid items otherwise refuse to shrink below their content size).
+            panelDiv.style.minWidth = '0';
+            panelDiv.style.minHeight = '0';
+            if (layoutKey === 'tri-top' && index === 0) {
+                // Panel 0 spans the full top row; panels 1-2 auto-flow onto row 2.
+                panelDiv.style.gridColumn = '1 / span 2';
+            } else if (layoutKey === 'tri-bottom' && index === 2) {
+                // Panels 0-1 auto-flow across row 1; panel 2 spans the full bottom row.
+                panelDiv.style.gridColumn = '1 / span 2';
+            } else if (layoutKey === 'five') {
+                // Top row: 2 wide panels (half the 6-col grid each); bottom row:
+                // 3 narrow panels (a third each). Auto-flow places them in order.
+                panelDiv.style.gridColumn = index < 2 ? 'span 3' : 'span 2';
+            }
+            // quad / six: uniform cells, no explicit span needed.
         } else if (layoutKey === 'left-right') {
             panelDiv.style.width = '50%';
             panelDiv.style.height = '100%';
-        } else if (layoutKey === 'tri-top') {
-            panelDiv.style.width = index === 0 ? '100%' : '50%';
-            panelDiv.style.height = '50%';
-        } else if (layoutKey === 'tri-bottom') {
-            panelDiv.style.width = index === 2 ? '100%' : '50%';
-            panelDiv.style.height = '50%';
         } else if (layoutKey === 'follower') {
             panelDiv.style.width = '100%';
             panelDiv.style.height = '100%';
@@ -3094,6 +3131,22 @@ try {
     }
 
     /**
+     * Dock every currently popped-out panel back into this window at once.
+     * Broadcasts a `dock-all` request rather than reaching into each popup's
+     * state directly — every live popup reacts via its own dockFollowerPanel
+     * (the SAME per-panel path its own Dock button uses), so each redock
+     * carries the popup's actual live sub-panel state and closes itself, and
+     * `_redockPanel`'s existing `_starting` single-flight queue (main side)
+     * already serialises concurrent `docked` replies safely — no extra guard
+     * needed here for the bulk case.
+     */
+    function dockAllPanels() {
+        if (popups.size === 0) return;
+        const ch = _ssChannel();
+        if (ch) ch.postMessage({ type: 'dock-all' });
+    }
+
+    /**
      * ── Main toggle ──
      */
     function rebuildLayout() {
@@ -3290,6 +3343,14 @@ try {
 
         // Hook into the time sync loop
         startTimeSync();
+
+        // Fade the wrap in now that all panels are built and sized — matches
+        // the fade pattern used elsewhere in this codebase (_showMainToast,
+        // player HUD) so entering split isn't a jarring hard cut.
+        if (wrap) {
+            wrap.style.transition = 'opacity 0.15s ease-in';
+            wrap.style.opacity = '1';
+        }
         } catch (err) {
             // Rollback any partial state so the UI doesn't get stuck with
             // active=true, default highway hidden, and no panels — that's
@@ -3377,6 +3438,23 @@ try {
     }
 
     /**
+     * Fade the wrap out, then run the real stop once the transition has had
+     * time to play. Only used for the user-initiated Stop (toggle()) — the
+     * navigation-driven auto-stop paths (song change, leaving the player)
+     * call stopSplitScreen() directly and synchronously, since those rely on
+     * `active` flipping immediately (e.g. before a new song's _play() runs).
+     */
+    function _fadeOutWrapThenStop() {
+        if (wrap) {
+            wrap.style.transition = 'opacity 0.12s ease-out';
+            wrap.style.opacity = '0';
+            setTimeout(stopSplitScreen, 130);
+            return;
+        }
+        stopSplitScreen();
+    }
+
+    /**
      * Toggle.
      */
     function toggle() {
@@ -3385,7 +3463,7 @@ try {
             // User-intent off — persist so navigation-driven stops (song
             // switch, leaving player) don't erase the user's on-state.
             try { localStorage.setItem('splitscreenActive', 'false'); } catch (_) {}
-            stopSplitScreen();
+            _fadeOutWrapThenStop();
         } else {
             startSplitScreen();
         }
@@ -3447,9 +3525,11 @@ try {
             // forced close / OS kill): otherwise their slot lingers and we'd
             // keep broadcasting to nobody at 60 Hz indefinitely. popup.closed
             // is a cheap same-origin boolean.
+            let _reaped = false;
             for (const [id, e] of popups) {
-                if (e.popup && e.popup.closed) popups.delete(id);
+                if (e.popup && e.popup.closed) { popups.delete(id); _reaped = true; }
             }
+            if (_reaped) updateBtn(); // keep Dock all's visibility in sync promptly
             if (popups.size === 0 && !_lanShare) { _stopPopupBroadcaster(); return; }
             // Only broadcast when the playhead actually moved — skips ~60
             // redundant structured-clone messages/sec (and the follower's
@@ -3960,7 +4040,7 @@ try {
             try { localStorage.setItem('splitscreenLayout', layout); } catch (_) {}
         }
         if (savedPrefs.length > LAYOUTS[layout].panels) {
-            // Every layout is full (4-panel max) — keep what fits, drop the
+            // Every layout is full (6-panel max) — keep what fits, drop the
             // rest rather than silently discarding via the modulo in
             // startSplitScreen with no explanation.
             const dropped = savedPrefs.length - LAYOUTS[layout].panels;
@@ -4004,6 +4084,8 @@ try {
             { value: 'tri-top',     label: '⊤ 1+2' },
             { value: 'tri-bottom',  label: '⊥ 2+1' },
             { value: 'quad',        label: '⊞ Quad' },
+            { value: 'five',        label: '⊟ Five' },
+            { value: 'six',         label: '⊞ Six' },
         ];
         for (const o of options) {
             const opt = document.createElement('option');
@@ -4088,6 +4170,7 @@ try {
     // ── Hide/show controls bar ──
     let hideBtn = null;
     let floatBtn = null;
+    let dockAllBtn = null;
 
     /**
      * Create Hide Btn.
@@ -4116,6 +4199,29 @@ try {
             c.appendChild(hideBtn);
         }
         return hideBtn;
+    }
+
+    /**
+     * Create Dock All Btn. A bulk "dock every popped-out panel" control,
+     * visible only while >=1 panel is currently popped out (see updateBtn).
+     */
+    function createDockAllBtn() {
+        if (dockAllBtn) return dockAllBtn;
+        const slot = _ssPlayerControlSlot();
+        const c = slot || document.getElementById('player-controls');
+        if (!c) return null;
+        if (_ssIsV3() && !slot) return null;  // v3 mounts exclusively into the slot
+        dockAllBtn = document.createElement('button');
+        dockAllBtn.id = 'btn-splitscreen-dock-all';
+        dockAllBtn.className = OFF_CLASS;
+        dockAllBtn.textContent = '⇲ Dock all';
+        dockAllBtn.title = 'Dock every popped-out panel back into this window';
+        dockAllBtn.style.display = 'none';
+        dockAllBtn.onclick = dockAllPanels;
+        const closeBtn = c.querySelector('button[onclick*="showScreen"]');
+        if (closeBtn) c.insertBefore(dockAllBtn, closeBtn);
+        else c.appendChild(dockAllBtn);
+        return dockAllBtn;
     }
 
     /**
@@ -4195,6 +4301,11 @@ try {
             hideBtn.textContent = controlsHidden ? '▴ Bar' : '▾ Bar';
         }
         if (floatBtn) floatBtn.style.display = (active && controlsHidden) ? '' : 'none';
+        // Independent of `active`: popping out every panel can leave split
+        // mode inactive in the main window (popOutPanel's last-panel-popped
+        // path calls stopSplitScreen()) while the popup(s) are still live —
+        // Dock all must stay visible so the user can get them back.
+        if (dockAllBtn) dockAllBtn.style.display = popups.size > 0 ? '' : 'none';
     }
 
     /**
@@ -4227,6 +4338,7 @@ try {
         createLayoutBtn();
         createHideBtn();
         createFloatingShowBtn();
+        createDockAllBtn();
     }
 
     // ── Resize handler ──
@@ -4588,6 +4700,13 @@ try {
             } else {
                 _onFollowerOrphaned();
             }
+        } else if (msg.type === 'dock-all') {
+            // Main window's "Dock all" button asked every live popup to dock
+            // itself. Reuse the exact single-panel dock path (dockFollowerPanel)
+            // so this popup's live state — not a stale pop-out-time snapshot —
+            // is what gets redocked; remote LAN viewers have nothing to dock
+            // into and dockFollowerPanel already no-ops for them.
+            if (!remote && panels.length) dockFollowerPanel(panels[0]);
         } else if (msg.type === 'share-ended') {
             if (remote) {
                 _onFollowerOrphaned('Sharing ended',
@@ -4869,9 +4988,14 @@ try {
             followerWrap.style.display = 'flex';
             followerWrap.style.flexDirection = 'row';
         } else if (layoutKey === 'quad') {
-            followerWrap.style.display = 'flex';
-            followerWrap.style.flexDirection = 'row';
-            followerWrap.style.flexWrap = 'wrap';
+            // CSS grid, not flex-wrap — same non-interactive-panel bug as the
+            // main window's wrap (see applyLayoutStyle): followerWrap's height
+            // comes from a position inset (bottom:FOLLOWER_TOOLBAR_H), not an
+            // explicit height, which some browsers resolve as indefinite for
+            // %-height flex items in a wrapped row.
+            followerWrap.style.display = 'grid';
+            followerWrap.style.gridTemplateColumns = 'repeat(2,1fr)';
+            followerWrap.style.gridTemplateRows = 'repeat(2,1fr)';
         }
         // else: single (follower) — leave as block layout (no flex).
         document.body.appendChild(followerWrap);
@@ -5426,6 +5550,7 @@ try {
             panelToPrefs, migratePanelPrefs, _ctlRange,
             getSyncUrl, generateRoomKey, normalizeRoomKey, ensureRoomKey,
             buildShareUrl, makeRemoteFollowerCfg, ROOM_KEY_ALPHABET,
+            LAYOUTS, applyLayoutStyle, _bestFitLayout,
             _setArrangementsForTest(next) { arrangements = next; },
         };
     }
