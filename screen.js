@@ -3405,6 +3405,7 @@ try {
      * Stop Split Screen.
      */
     function stopSplitScreen() {
+        if (_stopFadeTimer) { clearTimeout(_stopFadeTimer); _stopFadeTimer = null; }
         savePanelPrefs();
         teardownPanels();  // flips active=false + emits focus change
         // Defensive clear at full-session-end. Well-behaved plugins
@@ -3437,18 +3438,28 @@ try {
         stopTimeSync();
     }
 
+    let _stopFadeTimer = null;
+
     /**
      * Fade the wrap out, then run the real stop once the transition has had
      * time to play. Only used for the user-initiated Stop (toggle()) — the
      * navigation-driven auto-stop paths (song change, leaving the player)
      * call stopSplitScreen() directly and synchronously, since those rely on
      * `active` flipping immediately (e.g. before a new song's _play() runs).
+     *
+     * A stop is already in flight until stopSplitScreen() actually runs and
+     * flips `active`, so repeated toggle() calls while fading out would each
+     * re-enter here — guard against scheduling more than one stop.
      */
     function _fadeOutWrapThenStop() {
+        if (_stopFadeTimer) return;
         if (wrap) {
             wrap.style.transition = 'opacity 0.12s ease-out';
             wrap.style.opacity = '0';
-            setTimeout(stopSplitScreen, 130);
+            _stopFadeTimer = setTimeout(() => {
+                _stopFadeTimer = null;
+                stopSplitScreen();
+            }, 130);
             return;
         }
         stopSplitScreen();

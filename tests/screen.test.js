@@ -276,6 +276,8 @@ test('multi-panel layouts (tri/quad/five/six) are CSS grid, not flex-wrap', () =
         assert.equal(LAYOUTS[key].style, 'grid', `${key} should use grid`);
         assert.ok(Number.isInteger(LAYOUTS[key].cols) && LAYOUTS[key].cols > 0, `${key}.cols`);
         assert.ok(Number.isInteger(LAYOUTS[key].rows) && LAYOUTS[key].rows > 0, `${key}.rows`);
+        assert.ok(LAYOUTS[key].cols * LAYOUTS[key].rows >= LAYOUTS[key].panels,
+            `${key} grid (${LAYOUTS[key].cols}x${LAYOUTS[key].rows}) must fit its ${LAYOUTS[key].panels} panels`);
     }
     // top-bottom/left-right stay flex (2-panel layouts never hit the
     // %-height-in-flex-wrap ambiguity since they don't wrap onto a 2nd row).
@@ -321,6 +323,7 @@ test('applyLayoutStyle still uses flex for the 2-panel layouts', () => {
 test('_bestFitLayout picks the smallest layout with room, and caps at six', () => {
     const { _bestFitLayout } = freshPlugin();
     assert.equal(_bestFitLayout(1), 'top-bottom');
+    assert.equal(_bestFitLayout(2), 'top-bottom');
     assert.equal(_bestFitLayout(3), 'tri-top');
     assert.equal(_bestFitLayout(4), 'quad');
     assert.equal(_bestFitLayout(5), 'five');
