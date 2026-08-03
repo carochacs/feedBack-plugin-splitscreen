@@ -1954,6 +1954,10 @@ try {
         panel.lyricsMode = false;
 
         panel.hw.init(panel.canvas);
+        // Force false after every init(), same as recreatePanelHighway —
+        // init() may reset the highway's internal renderer state (including
+        // this flag) back to its true default even on a reused instance.
+        if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(false);
         panel.hw.resize();
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
@@ -2072,6 +2076,10 @@ try {
         panel.jumpingTabMode = false;
 
         panel.hw.init(panel.canvas);
+        // Force false after every init(), same as recreatePanelHighway —
+        // init() may reset the highway's internal renderer state (including
+        // this flag) back to its true default even on a reused instance.
+        if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(false);
         panel.hw.resize();
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
