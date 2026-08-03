@@ -761,6 +761,7 @@ try {
                 ? VIZ_PREFIX + ':' + p.vizMode + ':' + (arrangements[p.arrIndex]?.name || '')
                 : p.lyricsMode ? LYRICS_VALUE : (arrangements[p.arrIndex]?.name || ''),
             lyrics: !!p.lyricsOverlayOn,
+            chords: !!p.chordsOverlayOn,
             inverted: p.hw.getInverted(),
             lefty: p.hw.getLefty(),
             detectChannel: p.detectChannel || 'mono',
@@ -1309,6 +1310,14 @@ try {
         const updateLyricsStyle = (on) => styleToggle(lyricsBtn, on, '#065f46');
         bar.appendChild(lyricsBtn);
 
+        // Hidden unless window.createFretboardOverlay is available (the
+        // fretboard plugin's per-panel factory export) — same
+        // capability-check pattern as the jumping-tab / viz buttons.
+        const chordsBtn = makeToggleBtn('Chords');
+        const updateChordsStyle = (on) => styleToggle(chordsBtn, on, '#7c2d12');
+        chordsBtn.style.display = 'none';
+        bar.appendChild(chordsBtn);
+
         const tabBtn = makeToggleBtn('Tab');
         const updateTabStyle = (on) => styleToggle(tabBtn, on, '#1e40af');
         updateTabStyle(false);
@@ -1481,6 +1490,7 @@ try {
             invertBtn, updateInvertStyle,
             leftyBtn, updateLeftyStyle,
             lyricsBtn, updateLyricsStyle,
+            chordsBtn, updateChordsStyle,
             tabBtn, updateTabStyle,
             detectBtn, updateDetectStyle,
             channelBtn, deviceSelect, latWrap, latVal, latDown, latUp,
@@ -1536,6 +1546,7 @@ try {
             } else if (!p.lyricsMode) {
                 p.hw.resize();
             }
+            if (p.chordsOverlay) p.chordsOverlay.resize();
         }
     }
 
@@ -1882,6 +1893,7 @@ try {
         panel.leftyBtn.style.display = 'none';
         panel.tabBtn.style.display = 'none';
         panel.lyricsBtn.style.display = 'none';
+        panel.chordsBtn.style.display = 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = 'none';
         if (panel.channelBtn) panel.channelBtn.style.display = 'none';
         panel.masteryHeading.style.display = 'none';
@@ -1895,6 +1907,14 @@ try {
             panel.lyricsOverlay.destroy();
             panel.lyricsOverlay.el.remove();
             panel.lyricsOverlay = null;
+        }
+        // Same for the chords overlay — the highway is about to stop, so its
+        // getNotes()/getChords()/getTime() would just freeze rather than
+        // update, leaving a stale fretboard sitting on top of the lyrics
+        // pane. chordsOverlayOn is left untouched so it comes back on exit.
+        if (panel.chordsOverlay) {
+            panel.chordsOverlay.destroy();
+            panel.chordsOverlay = null;
         }
 
         panel.lyricsPane = createLyricsPane(panel.panelDiv);
@@ -1925,6 +1945,7 @@ try {
         panel.leftyBtn.style.display = '';
         panel.tabBtn.style.display = '';
         panel.lyricsBtn.style.display = '';
+        panel.chordsBtn.style.display = (typeof window.createFretboardOverlay === 'function') ? '' : 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = '';
         if (panel.channelBtn) panel.channelBtn.style.display = '';
         panel.masteryHeading.style.display = '';
@@ -1945,6 +1966,15 @@ try {
         if (panel.lyricsOverlayOn) {
             panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
             panel.lyricsOverlay.connect(currentFilename, 0);
+        }
+        // Restore the per-panel chords overlay if it was on before entering
+        // lyrics mode.
+        if (panel.chordsOverlayOn && typeof window.createFretboardOverlay === 'function') {
+            panel.chordsOverlay = window.createFretboardOverlay({
+                container: panel.panelDiv,
+                getHighway: () => panel.hw,
+                bottomOffset: () => panel.bar.offsetHeight || 28,
+            });
         }
         savePanelPrefs();
     }
@@ -1973,6 +2003,7 @@ try {
         panel.leftyBtn.style.display = 'none';
         panel.tabBtn.style.display = 'none';
         panel.lyricsBtn.style.display = 'none';
+        panel.chordsBtn.style.display = 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = 'none';
         if (panel.channelBtn) panel.channelBtn.style.display = 'none';
         panel.masteryHeading.style.display = 'none';
@@ -1983,6 +2014,10 @@ try {
             panel.lyricsOverlay.destroy();
             panel.lyricsOverlay.el.remove();
             panel.lyricsOverlay = null;
+        }
+        if (panel.chordsOverlay) {
+            panel.chordsOverlay.destroy();
+            panel.chordsOverlay = null;
         }
 
         const jtContainer = document.createElement('div');
@@ -2028,6 +2063,7 @@ try {
         panel.leftyBtn.style.display = '';
         panel.tabBtn.style.display = '';
         panel.lyricsBtn.style.display = '';
+        panel.chordsBtn.style.display = (typeof window.createFretboardOverlay === 'function') ? '' : 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = '';
         if (panel.channelBtn) panel.channelBtn.style.display = '';
         panel.masteryHeading.style.display = '';
@@ -2047,6 +2083,13 @@ try {
         if (panel.lyricsOverlayOn) {
             panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
             panel.lyricsOverlay.connect(currentFilename, 0);
+        }
+        if (panel.chordsOverlayOn && typeof window.createFretboardOverlay === 'function') {
+            panel.chordsOverlay = window.createFretboardOverlay({
+                container: panel.panelDiv,
+                getHighway: () => panel.hw,
+                bottomOffset: () => panel.bar.offsetHeight || 28,
+            });
         }
         savePanelPrefs();
     }
@@ -2184,6 +2227,8 @@ try {
         panel.lyricsPane = null;
         panel.lyricsOverlay = null;
         panel.lyricsOverlayOn = false;
+        panel.chordsOverlay = null;
+        panel.chordsOverlayOn = false;
         panel.jumpingTabMode = false;
         panel.jumpingTabPane = null;
         panel.jumpingTabContainer = null;
@@ -2412,6 +2457,40 @@ try {
             _toggleLyricsOverlay(panel.lyricsOverlayOn);
             savePanelPrefs();
         };
+
+        // Per-panel chord diagrams (fretboard overlay), mirroring the lyrics
+        // overlay above. window.createFretboardOverlay is the fretboard
+        // plugin's multi-instance factory export (feedBack-plugin-fretboard's
+        // own single global toggle is untouched by this — each panel here
+        // gets its own independent instance bound to that panel's own `hw`,
+        // so it reflects that panel's chart even though the main highway is
+        // hidden while splitscreen is active). Hidden entirely when the
+        // fretboard plugin isn't loaded.
+        const hasFretboardFactory = typeof window.createFretboardOverlay === 'function';
+        panel.chordsBtn.style.display = hasFretboardFactory ? '' : 'none';
+        panel.chordsOverlayOn = hasFretboardFactory && prefs?.chords === true;
+        const _toggleChordsOverlay = (on) => {
+            if (panel.chordsOverlay) {
+                panel.chordsOverlay.destroy();
+                panel.chordsOverlay = null;
+            }
+            if (on && hasFretboardFactory) {
+                panel.chordsOverlay = window.createFretboardOverlay({
+                    container: panel.panelDiv,
+                    getHighway: () => panel.hw,
+                    bottomOffset: () => panel.bar.offsetHeight || 28,
+                });
+            }
+            panel.updateChordsStyle(on);
+        };
+        if (hasFretboardFactory) {
+            _toggleChordsOverlay(panel.chordsOverlayOn);
+            panel.chordsBtn.onclick = () => {
+                panel.chordsOverlayOn = !panel.chordsOverlayOn;
+                _toggleChordsOverlay(panel.chordsOverlayOn);
+                savePanelPrefs();
+            };
+        }
 
         // Per-panel Highway/Tab mode toggle (uses tabview factory)
         const hasTabFactory = typeof window.createTabView === 'function';
@@ -2860,6 +2939,10 @@ try {
                 p.lyricsOverlay.destroy();
                 p.lyricsOverlay.el.remove();
                 p.lyricsOverlay = null;
+            }
+            if (p.chordsOverlay) {
+                p.chordsOverlay.destroy();
+                p.chordsOverlay = null;
             }
             if (p.jumpingTabPane) {
                 p.jumpingTabPane.destroy();
@@ -4300,6 +4383,7 @@ try {
         } else if (!panel.lyricsMode) {
             panel.hw.resize();
         }
+        if (panel.chordsOverlay) panel.chordsOverlay.resize();
         savePanelPrefs();
     }
 
