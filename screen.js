@@ -868,7 +868,16 @@ try {
      */
     function getWsUrl(filename, arrangement) {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const arrParam = arrangement !== undefined ? `?arrangement=${arrangement}` : '';
+        // `arrangement` here is a position in the local `arrangements` array
+        // (server-sorted smart-name order). The server's `?arrangement=`
+        // query param indexes into song.arrangements in its *original,
+        // unsorted* storage order — each entry's `.index` field carries that
+        // true index. Translate position -> true index so callers can keep
+        // working in local-array-position terms (dropdown option values, etc).
+        const serverIndex = arrangement !== undefined
+            ? (arrangements[arrangement]?.index ?? arrangement)
+            : undefined;
+        const arrParam = serverIndex !== undefined ? `?arrangement=${serverIndex}` : '';
         // Match core highway.js (`decodeURIComponent(filename)` before
         // building the WS URL — static/highway.js:3575). v3's songs.js
         // calls `playSong(encodeURIComponent(localFilename))`, so
@@ -1977,7 +1986,7 @@ try {
             panel.chordsOverlay = window.createFretboardOverlay({
                 container: panel.panelDiv,
                 getHighway: () => panel.hw,
-                bottomOffset: () => panel.bar.offsetHeight || 28,
+                bottomOffset: () => panel.bar.offsetHeight,
             });
         }
         savePanelPrefs();
@@ -2096,7 +2105,7 @@ try {
             panel.chordsOverlay = window.createFretboardOverlay({
                 container: panel.panelDiv,
                 getHighway: () => panel.hw,
-                bottomOffset: () => panel.bar.offsetHeight || 28,
+                bottomOffset: () => panel.bar.offsetHeight,
             });
         }
         savePanelPrefs();
@@ -2486,7 +2495,7 @@ try {
                 panel.chordsOverlay = window.createFretboardOverlay({
                     container: panel.panelDiv,
                     getHighway: () => panel.hw,
-                    bottomOffset: () => panel.bar.offsetHeight || 28,
+                    bottomOffset: () => panel.bar.offsetHeight,
                 });
             }
             panel.updateChordsStyle(on);
@@ -2591,9 +2600,10 @@ try {
         panel.tabBtn.disabled = true;
         try {
             const decoded = decodeURIComponent(currentFilename);
+            const serverIndex = arrangements[panel.arrIndex]?.index ?? panel.arrIndex;
             const url = '/api/plugins/tabview/gp5/' +
                 encodeURIComponent(decoded) +
-                '?arrangement=' + panel.arrIndex;
+                '?arrangement=' + serverIndex;
             const resp = await fetch(url);
             if (!resp.ok) throw new Error(await resp.text());
             const data = await resp.arrayBuffer();

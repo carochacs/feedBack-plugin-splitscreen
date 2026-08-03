@@ -52,6 +52,31 @@ test('getWsUrl uses wss:// under https', () => {
     assert.match(getWsUrl('a.sloppak', 1), /^wss:\/\//);
 });
 
+test('getWsUrl translates a local dropdown position to the arrangement\'s true server index', () => {
+    const mod = freshPlugin();
+    // Server-sorted order (Lead, Rhythm, Bass) differs from original storage
+    // order: Rhythm is stored at index 2, Bass at index 0.
+    mod._setArrangementsForTest([
+        { name: 'Lead', index: 1 },
+        { name: 'Rhythm', index: 2 },
+        { name: 'Bass', index: 0 },
+    ]);
+    assert.equal(
+        mod.getWsUrl('song.sloppak', 1),
+        'ws://localhost:8420/ws/highway/song.sloppak?arrangement=2');
+    assert.equal(
+        mod.getWsUrl('song.sloppak', 2),
+        'ws://localhost:8420/ws/highway/song.sloppak?arrangement=0');
+});
+
+test('getWsUrl falls back to the supplied position when .index is unavailable', () => {
+    const mod = freshPlugin();
+    mod._setArrangementsForTest([{ name: 'Lead' }, { name: 'Rhythm' }]);
+    assert.equal(
+        mod.getWsUrl('song.sloppak', 1),
+        'ws://localhost:8420/ws/highway/song.sloppak?arrangement=1');
+});
+
 test('resolveArrIndex is case-insensitive and finds by name', () => {
     const mod = freshPlugin();
     mod._setArrangementsForTest([{ name: 'Lead' }, { name: 'Rhythm' }, { name: 'Bass' }]);
