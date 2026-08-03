@@ -1563,7 +1563,6 @@ try {
         const old = panel.hw;
         const inverted = old.getInverted();
         const lefty = old.getLefty();
-        const lyricsVisible = typeof old.getLyricsVisible === 'function' ? old.getLyricsVisible() : true;
         const mastery = old.getMastery();
         old.stop();
 
@@ -1603,7 +1602,13 @@ try {
         hw.init(panel.canvas);
         hw.setInverted(inverted);
         hw.setLefty(lefty);
-        if (typeof hw.setLyricsVisible === 'function') hw.setLyricsVisible(lyricsVisible);
+        // Always false: the panel's own DOM lyrics overlay (createLyricsPane)
+        // is the single lyrics display for splitscreen panels, working
+        // uniformly across every renderer. Leaving the highway's built-in
+        // flag on double-renders full lyric text — the default 2D renderer's
+        // drawLyrics() draws its own copy, and viz plugins that read
+        // bundle.lyricsVisible (e.g. 3D Highway) draw a third.
+        if (typeof hw.setLyricsVisible === 'function') hw.setLyricsVisible(false);
         hw.setMastery(mastery);
         hw.resize();
         panel.hw = hw;
@@ -1949,17 +1954,22 @@ try {
         panel.lyricsMode = false;
 
         panel.hw.init(panel.canvas);
+        // Force false after every init(), same as recreatePanelHighway —
+        // init() may reset the highway's internal renderer state (including
+        // this flag) back to its true default even on a reused instance.
+        if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(false);
         panel.hw.resize();
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
         hookPanelReady(panel);
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
         // Restore the per-panel lyrics overlay if it was on before entering
-        // lyrics mode.
+        // lyrics mode. Never enable the highway's built-in lyrics flag here
+        // — the overlay is the only lyrics display splitscreen panels use;
+        // see recreatePanelHighway for why.
         if (panel.lyricsOverlayOn) {
             panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
             panel.lyricsOverlay.connect(currentFilename, 0);
-            if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(true);
         }
         // Restore the per-panel chords overlay if it was on before entering
         // lyrics mode.
@@ -2066,15 +2076,21 @@ try {
         panel.jumpingTabMode = false;
 
         panel.hw.init(panel.canvas);
+        // Force false after every init(), same as recreatePanelHighway —
+        // init() may reset the highway's internal renderer state (including
+        // this flag) back to its true default even on a reused instance.
+        if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(false);
         panel.hw.resize();
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
         hookPanelReady(panel);
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
+        // Never enable the highway's built-in lyrics flag here — the overlay
+        // is the only lyrics display splitscreen panels use; see
+        // recreatePanelHighway for why.
         if (panel.lyricsOverlayOn) {
             panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
             panel.lyricsOverlay.connect(currentFilename, 0);
-            if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(true);
         }
         if (panel.chordsOverlayOn && typeof window.createFretboardOverlay === 'function') {
             panel.chordsOverlay = window.createFretboardOverlay({
@@ -2249,13 +2265,13 @@ try {
 
         panel.hw.init(panel.canvas);
 
-        // Apply saved preferences
+        // Apply saved preferences. Lyrics are handled below by
+        // _toggleLyricsOverlay, which is the sole source of truth for
+        // splitscreen's lyrics display — never set the highway's built-in
+        // lyrics flag from prefs here.
         if (prefs && !isLyricsMode && !isJumpingTabMode) {
             if (prefs.inverted !== undefined) panel.hw.setInverted(prefs.inverted);
             if (prefs.lefty !== undefined) panel.hw.setLefty(prefs.lefty);
-            if (prefs.lyrics !== undefined && typeof panel.hw.setLyricsVisible === 'function') {
-                panel.hw.setLyricsVisible(prefs.lyrics);
-            }
         }
 
         const savedMastery = (prefs?.mastery !== undefined) ? prefs.mastery : 1;
@@ -2409,8 +2425,16 @@ try {
         // so it works regardless of which renderer (2D, piano, drums, 3D
         // Highway, future viz) owns the canvas. Future-proof: any new viz
         // plugin gets lyric support for free without modification.
-        // Also keeps the highway's built-in setLyricsVisible (in-canvas
-        // underline cue) in sync — complementary to the overlay text.
+        //
+        // The highway's built-in setLyricsVisible is ALWAYS kept false here,
+        // never synced to `on`. It defaults to true on a fresh highway, and
+        // every renderer that respects it draws its own full lyric text —
+        // the default 2D renderer's drawLyrics(), and viz plugins that read
+        // bundle.lyricsVisible (e.g. 3D Highway). Passing `on` through used
+        // to turn overlay-on into a double lyrics render (DOM overlay text +
+        // the renderer's own copy) on top of whichever renderer is active.
+        // Forcing it false unconditionally still suppresses that default-true
+        // for panels with the overlay off, without ever re-enabling it.
         panel.lyricsOverlayOn = prefs?.lyrics === true;
         const _toggleLyricsOverlay = (on) => {
             if (on) {
@@ -2427,15 +2451,14 @@ try {
                 panel.lyricsOverlay = null;
             }
             if (typeof panel.hw.setLyricsVisible === 'function') {
-                panel.hw.setLyricsVisible(on);
+                panel.hw.setLyricsVisible(false);
             }
             panel.updateLyricsStyle(on);
         };
-        // Always invoke _toggleLyricsOverlay so the highway's built-in
-        // lyricsVisible flag (which feeds bundle.lyricsVisible consumed by
-        // viz renderers like 3D highway) is synced to the saved toggle
-        // state. Without this, viz panels with overlay off would still
-        // render lyrics because the built-in flag defaults to true.
+        // Always invoke _toggleLyricsOverlay (even off) so the highway's
+        // built-in lyricsVisible flag is forced false on init — it defaults
+        // to true on a fresh highway, and the overlay is the only lyrics
+        // display splitscreen panels should ever show.
         _toggleLyricsOverlay(panel.lyricsOverlayOn);
         panel.lyricsBtn.onclick = () => {
             panel.lyricsOverlayOn = !panel.lyricsOverlayOn;
