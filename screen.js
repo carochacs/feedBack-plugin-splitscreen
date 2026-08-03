@@ -761,6 +761,7 @@ try {
                 ? VIZ_PREFIX + ':' + p.vizMode + ':' + (arrangements[p.arrIndex]?.name || '')
                 : p.lyricsMode ? LYRICS_VALUE : (arrangements[p.arrIndex]?.name || ''),
             lyrics: !!p.lyricsOverlayOn,
+            chords: !!p.chordsOverlayOn,
             inverted: p.hw.getInverted(),
             lefty: p.hw.getLefty(),
             detectChannel: p.detectChannel || 'mono',
@@ -1318,6 +1319,14 @@ try {
         const updateLyricsStyle = (on) => styleToggle(lyricsBtn, on, '#065f46');
         bar.appendChild(lyricsBtn);
 
+        // Hidden unless window.createFretboardOverlay is available (the
+        // fretboard plugin's per-panel factory export) — same
+        // capability-check pattern as the jumping-tab / viz buttons.
+        const chordsBtn = makeToggleBtn('Chords');
+        const updateChordsStyle = (on) => styleToggle(chordsBtn, on, '#7c2d12');
+        chordsBtn.style.display = 'none';
+        bar.appendChild(chordsBtn);
+
         const tabBtn = makeToggleBtn('Tab');
         const updateTabStyle = (on) => styleToggle(tabBtn, on, '#1e40af');
         updateTabStyle(false);
@@ -1490,6 +1499,7 @@ try {
             invertBtn, updateInvertStyle,
             leftyBtn, updateLeftyStyle,
             lyricsBtn, updateLyricsStyle,
+            chordsBtn, updateChordsStyle,
             tabBtn, updateTabStyle,
             detectBtn, updateDetectStyle,
             channelBtn, deviceSelect, latWrap, latVal, latDown, latUp,
@@ -1545,6 +1555,7 @@ try {
             } else if (!p.lyricsMode) {
                 p.hw.resize();
             }
+            if (p.chordsOverlay) p.chordsOverlay.resize();
         }
     }
 
@@ -1561,7 +1572,6 @@ try {
         const old = panel.hw;
         const inverted = old.getInverted();
         const lefty = old.getLefty();
-        const lyricsVisible = typeof old.getLyricsVisible === 'function' ? old.getLyricsVisible() : true;
         const mastery = old.getMastery();
         old.stop();
 
@@ -1601,7 +1611,13 @@ try {
         hw.init(panel.canvas);
         hw.setInverted(inverted);
         hw.setLefty(lefty);
-        if (typeof hw.setLyricsVisible === 'function') hw.setLyricsVisible(lyricsVisible);
+        // Always false: the panel's own DOM lyrics overlay (createLyricsPane)
+        // is the single lyrics display for splitscreen panels, working
+        // uniformly across every renderer. Leaving the highway's built-in
+        // flag on double-renders full lyric text — the default 2D renderer's
+        // drawLyrics() draws its own copy, and viz plugins that read
+        // bundle.lyricsVisible (e.g. 3D Highway) draw a third.
+        if (typeof hw.setLyricsVisible === 'function') hw.setLyricsVisible(false);
         hw.setMastery(mastery);
         hw.resize();
         panel.hw = hw;
@@ -1886,6 +1902,7 @@ try {
         panel.leftyBtn.style.display = 'none';
         panel.tabBtn.style.display = 'none';
         panel.lyricsBtn.style.display = 'none';
+        panel.chordsBtn.style.display = 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = 'none';
         if (panel.channelBtn) panel.channelBtn.style.display = 'none';
         panel.masteryHeading.style.display = 'none';
@@ -1899,6 +1916,14 @@ try {
             panel.lyricsOverlay.destroy();
             panel.lyricsOverlay.el.remove();
             panel.lyricsOverlay = null;
+        }
+        // Same for the chords overlay — the highway is about to stop, so its
+        // getNotes()/getChords()/getTime() would just freeze rather than
+        // update, leaving a stale fretboard sitting on top of the lyrics
+        // pane. chordsOverlayOn is left untouched so it comes back on exit.
+        if (panel.chordsOverlay) {
+            panel.chordsOverlay.destroy();
+            panel.chordsOverlay = null;
         }
 
         panel.lyricsPane = createLyricsPane(panel.panelDiv);
@@ -1929,6 +1954,7 @@ try {
         panel.leftyBtn.style.display = '';
         panel.tabBtn.style.display = '';
         panel.lyricsBtn.style.display = '';
+        panel.chordsBtn.style.display = (typeof window.createFretboardOverlay === 'function') ? '' : 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = '';
         if (panel.channelBtn) panel.channelBtn.style.display = '';
         panel.masteryHeading.style.display = '';
@@ -1937,17 +1963,31 @@ try {
         panel.lyricsMode = false;
 
         panel.hw.init(panel.canvas);
+        // Force false after every init(), same as recreatePanelHighway —
+        // init() may reset the highway's internal renderer state (including
+        // this flag) back to its true default even on a reused instance.
+        if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(false);
         panel.hw.resize();
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
         hookPanelReady(panel);
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
         // Restore the per-panel lyrics overlay if it was on before entering
-        // lyrics mode.
+        // lyrics mode. Never enable the highway's built-in lyrics flag here
+        // — the overlay is the only lyrics display splitscreen panels use;
+        // see recreatePanelHighway for why.
         if (panel.lyricsOverlayOn) {
             panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
             panel.lyricsOverlay.connect(currentFilename, 0);
-            if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(true);
+        }
+        // Restore the per-panel chords overlay if it was on before entering
+        // lyrics mode.
+        if (panel.chordsOverlayOn && typeof window.createFretboardOverlay === 'function') {
+            panel.chordsOverlay = window.createFretboardOverlay({
+                container: panel.panelDiv,
+                getHighway: () => panel.hw,
+                bottomOffset: () => panel.bar.offsetHeight || 28,
+            });
         }
         savePanelPrefs();
     }
@@ -1976,6 +2016,7 @@ try {
         panel.leftyBtn.style.display = 'none';
         panel.tabBtn.style.display = 'none';
         panel.lyricsBtn.style.display = 'none';
+        panel.chordsBtn.style.display = 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = 'none';
         if (panel.channelBtn) panel.channelBtn.style.display = 'none';
         panel.masteryHeading.style.display = 'none';
@@ -1986,6 +2027,10 @@ try {
             panel.lyricsOverlay.destroy();
             panel.lyricsOverlay.el.remove();
             panel.lyricsOverlay = null;
+        }
+        if (panel.chordsOverlay) {
+            panel.chordsOverlay.destroy();
+            panel.chordsOverlay = null;
         }
 
         const jtContainer = document.createElement('div');
@@ -2031,6 +2076,7 @@ try {
         panel.leftyBtn.style.display = '';
         panel.tabBtn.style.display = '';
         panel.lyricsBtn.style.display = '';
+        panel.chordsBtn.style.display = (typeof window.createFretboardOverlay === 'function') ? '' : 'none';
         if (panel.detectBtn) panel.detectBtn.style.display = '';
         if (panel.channelBtn) panel.channelBtn.style.display = '';
         panel.masteryHeading.style.display = '';
@@ -2039,15 +2085,28 @@ try {
         panel.jumpingTabMode = false;
 
         panel.hw.init(panel.canvas);
+        // Force false after every init(), same as recreatePanelHighway —
+        // init() may reset the highway's internal renderer state (including
+        // this flag) back to its true default even on a reused instance.
+        if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(false);
         panel.hw.resize();
         panel.arrIndex = arrIndex;
         panel.arrName.textContent = arrangements[arrIndex]?.name || '';
         hookPanelReady(panel);
         panel.hw.connect(getWsUrl(currentFilename, arrIndex), { onSongInfo: () => {} });
+        // Never enable the highway's built-in lyrics flag here — the overlay
+        // is the only lyrics display splitscreen panels use; see
+        // recreatePanelHighway for why.
         if (panel.lyricsOverlayOn) {
             panel.lyricsOverlay = createLyricsPane(panel.panelDiv, { overlay: true });
             panel.lyricsOverlay.connect(currentFilename, 0);
-            if (typeof panel.hw.setLyricsVisible === 'function') panel.hw.setLyricsVisible(true);
+        }
+        if (panel.chordsOverlayOn && typeof window.createFretboardOverlay === 'function') {
+            panel.chordsOverlay = window.createFretboardOverlay({
+                container: panel.panelDiv,
+                getHighway: () => panel.hw,
+                bottomOffset: () => panel.bar.offsetHeight || 28,
+            });
         }
         savePanelPrefs();
     }
@@ -2185,6 +2244,8 @@ try {
         panel.lyricsPane = null;
         panel.lyricsOverlay = null;
         panel.lyricsOverlayOn = false;
+        panel.chordsOverlay = null;
+        panel.chordsOverlayOn = false;
         panel.jumpingTabMode = false;
         panel.jumpingTabPane = null;
         panel.jumpingTabContainer = null;
@@ -2213,13 +2274,13 @@ try {
 
         panel.hw.init(panel.canvas);
 
-        // Apply saved preferences
+        // Apply saved preferences. Lyrics are handled below by
+        // _toggleLyricsOverlay, which is the sole source of truth for
+        // splitscreen's lyrics display — never set the highway's built-in
+        // lyrics flag from prefs here.
         if (prefs && !isLyricsMode && !isJumpingTabMode) {
             if (prefs.inverted !== undefined) panel.hw.setInverted(prefs.inverted);
             if (prefs.lefty !== undefined) panel.hw.setLefty(prefs.lefty);
-            if (prefs.lyrics !== undefined && typeof panel.hw.setLyricsVisible === 'function') {
-                panel.hw.setLyricsVisible(prefs.lyrics);
-            }
         }
 
         const savedMastery = (prefs?.mastery !== undefined) ? prefs.mastery : 1;
@@ -2373,8 +2434,16 @@ try {
         // so it works regardless of which renderer (2D, piano, drums, 3D
         // Highway, future viz) owns the canvas. Future-proof: any new viz
         // plugin gets lyric support for free without modification.
-        // Also keeps the highway's built-in setLyricsVisible (in-canvas
-        // underline cue) in sync — complementary to the overlay text.
+        //
+        // The highway's built-in setLyricsVisible is ALWAYS kept false here,
+        // never synced to `on`. It defaults to true on a fresh highway, and
+        // every renderer that respects it draws its own full lyric text —
+        // the default 2D renderer's drawLyrics(), and viz plugins that read
+        // bundle.lyricsVisible (e.g. 3D Highway). Passing `on` through used
+        // to turn overlay-on into a double lyrics render (DOM overlay text +
+        // the renderer's own copy) on top of whichever renderer is active.
+        // Forcing it false unconditionally still suppresses that default-true
+        // for panels with the overlay off, without ever re-enabling it.
         panel.lyricsOverlayOn = prefs?.lyrics === true;
         const _toggleLyricsOverlay = (on) => {
             if (on) {
@@ -2391,21 +2460,54 @@ try {
                 panel.lyricsOverlay = null;
             }
             if (typeof panel.hw.setLyricsVisible === 'function') {
-                panel.hw.setLyricsVisible(on);
+                panel.hw.setLyricsVisible(false);
             }
             panel.updateLyricsStyle(on);
         };
-        // Always invoke _toggleLyricsOverlay so the highway's built-in
-        // lyricsVisible flag (which feeds bundle.lyricsVisible consumed by
-        // viz renderers like 3D highway) is synced to the saved toggle
-        // state. Without this, viz panels with overlay off would still
-        // render lyrics because the built-in flag defaults to true.
+        // Always invoke _toggleLyricsOverlay (even off) so the highway's
+        // built-in lyricsVisible flag is forced false on init — it defaults
+        // to true on a fresh highway, and the overlay is the only lyrics
+        // display splitscreen panels should ever show.
         _toggleLyricsOverlay(panel.lyricsOverlayOn);
         panel.lyricsBtn.onclick = () => {
             panel.lyricsOverlayOn = !panel.lyricsOverlayOn;
             _toggleLyricsOverlay(panel.lyricsOverlayOn);
             savePanelPrefs();
         };
+
+        // Per-panel chord diagrams (fretboard overlay), mirroring the lyrics
+        // overlay above. window.createFretboardOverlay is the fretboard
+        // plugin's multi-instance factory export (feedBack-plugin-fretboard's
+        // own single global toggle is untouched by this — each panel here
+        // gets its own independent instance bound to that panel's own `hw`,
+        // so it reflects that panel's chart even though the main highway is
+        // hidden while splitscreen is active). Hidden entirely when the
+        // fretboard plugin isn't loaded.
+        const hasFretboardFactory = typeof window.createFretboardOverlay === 'function';
+        panel.chordsBtn.style.display = hasFretboardFactory ? '' : 'none';
+        panel.chordsOverlayOn = hasFretboardFactory && prefs?.chords === true;
+        const _toggleChordsOverlay = (on) => {
+            if (panel.chordsOverlay) {
+                panel.chordsOverlay.destroy();
+                panel.chordsOverlay = null;
+            }
+            if (on && hasFretboardFactory) {
+                panel.chordsOverlay = window.createFretboardOverlay({
+                    container: panel.panelDiv,
+                    getHighway: () => panel.hw,
+                    bottomOffset: () => panel.bar.offsetHeight || 28,
+                });
+            }
+            panel.updateChordsStyle(on);
+        };
+        if (hasFretboardFactory) {
+            _toggleChordsOverlay(panel.chordsOverlayOn);
+            panel.chordsBtn.onclick = () => {
+                panel.chordsOverlayOn = !panel.chordsOverlayOn;
+                _toggleChordsOverlay(panel.chordsOverlayOn);
+                savePanelPrefs();
+            };
+        }
 
         // Per-panel Highway/Tab mode toggle (uses tabview factory)
         const hasTabFactory = typeof window.createTabView === 'function';
@@ -2855,6 +2957,10 @@ try {
                 p.lyricsOverlay.destroy();
                 p.lyricsOverlay.el.remove();
                 p.lyricsOverlay = null;
+            }
+            if (p.chordsOverlay) {
+                p.chordsOverlay.destroy();
+                p.chordsOverlay = null;
             }
             if (p.jumpingTabPane) {
                 p.jumpingTabPane.destroy();
@@ -4295,6 +4401,7 @@ try {
         } else if (!panel.lyricsMode) {
             panel.hw.resize();
         }
+        if (panel.chordsOverlay) panel.chordsOverlay.resize();
         savePanelPrefs();
     }
 
