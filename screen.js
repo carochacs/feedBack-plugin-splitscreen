@@ -1986,7 +1986,7 @@ try {
             panel.chordsOverlay = window.createFretboardOverlay({
                 container: panel.panelDiv,
                 getHighway: () => panel.hw,
-                bottomOffset: () => panel.bar.offsetHeight || 28,
+                bottomOffset: () => panel.bar.offsetHeight,
             });
         }
         savePanelPrefs();
@@ -2105,7 +2105,7 @@ try {
             panel.chordsOverlay = window.createFretboardOverlay({
                 container: panel.panelDiv,
                 getHighway: () => panel.hw,
-                bottomOffset: () => panel.bar.offsetHeight || 28,
+                bottomOffset: () => panel.bar.offsetHeight,
             });
         }
         savePanelPrefs();
@@ -2495,7 +2495,7 @@ try {
                 panel.chordsOverlay = window.createFretboardOverlay({
                     container: panel.panelDiv,
                     getHighway: () => panel.hw,
-                    bottomOffset: () => panel.bar.offsetHeight || 28,
+                    bottomOffset: () => panel.bar.offsetHeight,
                 });
             }
             panel.updateChordsStyle(on);
