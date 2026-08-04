@@ -358,4 +358,4 @@ Follow the lyrics/jumping-tab pattern:
 - All work goes on feature branches off `main` in this repo (`carochacs/feedBack-plugin-splitscreen`)
 - PRs target `carochacs/feedBack-plugin-splitscreen`
 - Use `gh pr create --repo carochacs/feedBack-plugin-splitscreen --base main --head carochacs:<branch>` from inside the plugin directory
-- Always branch from `origin/main` — there is no separate upstream remote
+- **Remote model** — set `upstream` to the canonical repository (`get-flashbacks/feedBack-plugin-splitscreen`); `origin` is your fork. This matches core slopsmith's fork+upstream convention. Always branch from `upstream/main` (`git fetch upstream && git checkout -b my-branch upstream/main`).
