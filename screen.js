@@ -3157,9 +3157,9 @@ try {
 
         // Remove this panel from the live layout. The remaining panels are
         // rebuilt; if popping leaves only 1 panel we stop split entirely and
-        // the main view goes back to its default highway. If 2 remain in a
-        // quad layout we downgrade to top-bottom so we don't leave an empty
-        // default slot in the grid.
+        // the main view goes back to its default highway. Otherwise we
+        // downgrade to the nearest-fit layout so we don't leave an empty
+        // default slot in the grid (see _bestFitLayout below).
         const wasActive = active;
         const remaining = panels.filter(p => p !== panel);
         const savedPrefs = remaining.map(panelToPrefs);
