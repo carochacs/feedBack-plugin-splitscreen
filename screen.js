@@ -3175,10 +3175,15 @@ try {
             stopSplitScreen();
             return;
         }
-        // 2+ remaining. Downgrade quad → top-bottom if we'd otherwise leave
-        // an empty default slot. Keep top-bottom / left-right as-is.
+        // 2+ remaining. Downgrade to the smallest layout that still fits
+        // everyone left, so we don't leave an empty default slot — e.g.
+        // five (5) -> quad (4), quad (4) -> tri-top (3), six (6) -> five (5).
+        // Was hardcoded to 'top-bottom' from back when that was the only
+        // downgrade target; that collapsed every layout above quad straight
+        // to 2 panels instead of the nearest fit (splitscreen#27). Reuses
+        // the same _bestFitLayout() the dock-back path already relies on.
         if (wasActive && LAYOUTS[layout] && savedPrefs.length < LAYOUTS[layout].panels) {
-            layout = 'top-bottom';
+            layout = _bestFitLayout(savedPrefs.length);
             try { localStorage.setItem('splitscreenLayout', layout); } catch (_) {}
         }
         if (wasActive) {
