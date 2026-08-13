@@ -50,7 +50,7 @@ screen.js
 | `wrap` | element\|null | The `#splitscreen-wrap` div, or null when inactive |
 | `currentFilename` | string\|null | The filename passed to the last `playSong` call |
 | `arrangements` | array | Arrangement list from the last `song_info` WebSocket message |
-| `vizPlugins` | array | `{id, name, …}` entries from `/api/plugins` where `type==='visualization'`. Populated once on page load via `fetchVizPlugins()`. Factory availability (`slopsmithViz_<id>`) is checked lazily in `populateSelect()`, not at fetch time. |
+| `vizPlugins` | array | `{id, name, …}` entries from `/api/plugins` where `type==='visualization'`. Populated once on page load via `fetchVizPlugins()`. Factory availability (`feedBackViz_<id>`, legacy `slopsmithViz_<id>`) is checked lazily in `populateSelect()`, not at fetch time. |
 | `syncInterval` | id\|null | The `setInterval` handle for the time sync loop |
 | `layoutBtn` | element\|null | The layout `<select>` injected into `#player-controls` |
 | `hideBtn` | element\|null | The `▾ Bar` button injected into `#player-controls` |
@@ -182,7 +182,11 @@ Each panel is always in exactly one of these modes. Flags are mutually exclusive
 
 ### Viz renderer (`vizMode = pluginId string`)
 - Highway NOT stopped — it stays alive with its WebSocket and rAF loop
-- `panel.hw.setRenderer(window['slopsmithViz_' + pluginId]())` installs the renderer
+- `panel.hw.setRenderer(vizFactory(pluginId)())` installs the renderer. The factory global
+  was renamed `slopsmithViz_<id>` -> `feedBackViz_<id>` in the feedBack rename, so
+  `vizFactory(id)` walks `VIZ_FACTORY_PREFIXES = ['feedBackViz_', 'slopsmithViz_']` in that
+  order and returns the first hit — current and legacy viz plugins both resolve.
+  `hasVizFactory(id)` is the boolean form used for capability checks.
 - `canvas` stays visible (renderer draws to it)
 - Tab button hidden. A **"3D ⚙"** button (`vizSettingsBtn`) is shown if the viz plugin has per-panel controls (see "Per-panel viz controls" below); it opens `vizPopover` with those controls scoped to this panel. Other viz config still lives in the plugin's global settings UI.
 - To exit: `recreatePanelHighway(panel)` discards the viz highway and installs a fresh 2D highway; `_hideVizControls(panel)` hides the button/popover
@@ -198,10 +202,10 @@ Each panel is always in exactly one of these modes. Flags are mutually exclusive
 
 When a panel is in viz mode, splitscreen shows a `vizSettingsBtn` ("3D ⚙") that opens `vizPopover` — a small popover with controls that override that viz plugin's settings **for this panel only**. The controls are generated from a descriptor, so adding a new per-panel option doesn't require touching the popover code.
 
-- **Descriptor lookup** — `getPanelControlsFor(pluginId)` returns `null` for any plugin other than `highway_3d` (v1 — `_vizPanelGet`/`_vizPanelSet` are hard-wired to highway_3d's storage scheme + `window.h3dBgSet*` setters); for `highway_3d` it returns `window.slopsmithViz_highway_3d.panelControls` if exposed, else the built-in `VIZ_PANEL_CONTROLS.highway_3d` (`palette`, `cameraSmoothing`, `cameraLockLow`, `cameraLockZoom`). The viz-plugin-published list wins, so the plugin can keep the *list of controls* current without splitscreen edits — generalizing to other plugins later means extending the descriptor with per-plugin storage/setter info (or read/write fns) and dropping the gate. Each descriptor entry: `{ key, label, type:'toggle'|'range'|'select', default, min?, max?, step?, options? }` where `options` for `select` is `[{id,label}]`; for `range`, `min`/`max` default to `0`/`1` and `step` to `0.05` when omitted (`_ctlRange`). A plugin-published **empty array** is a valid override — it opts out of per-panel controls (`_showVizControls` hides the button on an empty list).
+- **Descriptor lookup** — `getPanelControlsFor(pluginId)` returns `null` for any plugin other than `highway_3d` (v1 — `_vizPanelGet`/`_vizPanelSet` are hard-wired to highway_3d's storage scheme + `window.h3dBgSet*` setters); for `highway_3d` it returns `vizFactory('highway_3d').panelControls` if exposed, else the built-in `VIZ_PANEL_CONTROLS.highway_3d` (`palette`, `cameraSmoothing`, `cameraLockLow`, `cameraLockZoom`). The viz-plugin-published list wins, so the plugin can keep the *list of controls* current without splitscreen edits — generalizing to other plugins later means extending the descriptor with per-plugin storage/setter info (or read/write fns) and dropping the gate. Each descriptor entry: `{ key, label, type:'toggle'|'range'|'select', default, min?, max?, step?, options? }` where `options` for `select` is `[{id,label}]`; for `range`, `min`/`max` default to `0`/`1` and `step` to `0.05` when omitted (`_ctlRange`). A plugin-published **empty array** is a valid override — it opts out of per-panel controls (`_showVizControls` hides the button on an empty list).
 - **Storage** — per-panel values are written to the viz plugin's own per-panel keys, **not** `splitscreenPanelPrefs`. For `highway_3d`: `localStorage['h3d_bg_panel<N>_<key>']` (read by the plugin's `_bgReadSetting`, falling back to the global `h3d_bg_<key>`). `_vizPanelGet` / `_vizPanelSet` implement this; `_vizPanelSet` also re-fires `window.h3dBgSet<Key>(<currentGlobal>)` so the plugin's change event runs (instant rebuild for settings like `palette`; the 3D renderer also re-reads everything per frame, so even without the re-fire the panel key takes effect next frame). On reload, `enterVizMode` → `_showVizControls` → `buildVizPopover` re-reads the keys, so the popover reflects the saved per-panel state. Stale `h3d_bg_panel<N>_*` keys from a panel that later stopped running 3D are inert (the plugin only reads `panel<N>` keys for a live panel N) — they're left in place, same as the original palette behavior.
 - **Lifecycle** — `_showVizControls(panel, pluginId)` (builds the popover + shows the button) is called at the end of `enterVizMode` and the in-place viz-switch branch of `panel.select.onchange`. `_hideVizControls(panel)` (hides + empties) is called from `exitVizMode`, `enterLyricsMode`, `enterJumpingTabMode`. `togglePanelBar` closes the popover when hiding the bar (it's anchored to the bar height). A document-level capture `pointerdown` listener (`_closeAllVizPopovers`) closes any open popover on a click outside `.ss-viz-popover` / `[data-ss-viz-btn]`. The `vizSettingsBtn` click handler **rebuilds the popover from current localStorage every time it opens** — `_closeAllVizPopovers` / the outside-click handler only hide (don't empty), so the rebuild-on-open is the single point that guarantees the controls reflect any `h3d_bg_*` changes (e.g. via the plugin's own settings UI) made while the popover was closed.
-- **Note for new viz plugins** that want per-panel controls: expose `window.slopsmithViz_<id>.panelControls = [...]` and use the `*_panel<N>_*` localStorage convention the plugin already reads (or, if it uses a different scheme, the descriptor would need to carry `read`/`write` fns — not implemented in v1; only `highway_3d` is wired).
+- **Note for new viz plugins** that want per-panel controls: expose `window.feedBackViz_<id>.panelControls = [...]` and use the `*_panel<N>_*` localStorage convention the plugin already reads (or, if it uses a different scheme, the descriptor would need to carry `read`/`write` fns — not implemented in v1; only `highway_3d` is wired).
 
 ## `sizeCanvases()` — call it whenever layout space changes
 
@@ -323,7 +327,7 @@ The plugin capability-checks all external factories at runtime and gracefully di
 | Factory | Checked via | Used in |
 |---|---|---|
 | `window.createJumpingTabPane` | `typeof === 'function'` | `populateSelect()`, `enterJumpingTabMode()` |
-| `window['slopsmithViz_' + id]` | resolved via `fetchVizPlugins()` | `populateSelect()`, `enterVizMode()` — auto-discovered for any `type=visualization` plugin |
+| `window['feedBackViz_' + id]` (legacy `slopsmithViz_` fallback) | resolved via `fetchVizPlugins()` | `populateSelect()`, `enterVizMode()` — auto-discovered for any `type=visualization` plugin |
 | `window.createTabView` | `typeof === 'function'` | `initPanel()` (wires tabBtn) |
 | `window.createNoteDetector` | `typeof === 'function'` | `initPanel()` (wires detectBtn/channelBtn) |
 
@@ -355,7 +359,17 @@ Follow the lyrics/jumping-tab pattern:
 
 ## Git and PR conventions
 
-- All work goes on feature branches off `main` in this repo (`carochacs/feedBack-plugin-splitscreen`)
-- PRs target `carochacs/feedBack-plugin-splitscreen`
-- Use `gh pr create --repo carochacs/feedBack-plugin-splitscreen --base main --head carochacs:<branch>` from inside the plugin directory
-- Always branch from `origin/main` — there is no separate upstream remote
+- **`got-feedBack/feedBack-plugin-splitscreen` is the canonical plugin repo.** This
+  checkout (`get-flashbacks/feedBack-plugin-splitscreen`) is a fork of it. Keep changes
+  portable: anything a user or the upstream project would read — the README's install
+  instructions, links to feedBack or sibling plugins — points at `got-feedBack`, not at
+  this fork. Redirecting those to the fork is what stops the plugin being useful to the
+  repo it came from.
+- Day-to-day work goes on feature branches off `main` in this fork, and PRs target this
+  fork: `gh pr create --repo get-flashbacks/feedBack-plugin-splitscreen --base main --head <branch>`
+  from inside the plugin directory.
+- A fix that isn't fork-specific is worth opening upstream against
+  `got-feedBack/feedBack-plugin-splitscreen` too — same idea as core's
+  "upstream PRs retire debt" rule.
+- Always branch from `origin/main`; there is no `upstream` remote configured here, so add
+  one explicitly if you're preparing an upstream PR.

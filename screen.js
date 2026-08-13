@@ -19,6 +19,42 @@ try {
      *  <audio> element.
      * ====================================================================== */
 
+    // ── Reload idempotency (plugin-runtime-idempotent.v1) ─────────────────
+    // The Host may re-execute screen.js on plugin reload, which re-runs this
+    // whole IIFE. A second run must not execute ANY top-level statement with
+    // observable side effects, so bail out of the entire body rather than
+    // guarding individual hook sites.
+    //
+    // Guarding only the shared-global hooks isn't enough, because skipping
+    // hook installation is exactly what makes run #1's closures the live
+    // state — anything run #2 builds is then unreachable, and some of it
+    // actively fights run #1:
+    //   • the settings-sync wiring below re-binds the change handlers, which
+    //     would mutate run #2's `layout` / `alwaysSplit` — values run #1's
+    //     live playSong wrapper never reads, so the settings silently no-op;
+    //   • _maybeResumeLanShare() can't see run #1's `_lanShare`, so it opens
+    //     a SECOND relay socket and broadcaster for the same room, and
+    //     _ensureMainBroadcasterAndListener() reassigns `ch.onmessage` on the
+    //     shared BroadcastChannel — clobbering run #1's handler, which is
+    //     what processes popup `docked`/`closed`, so a popped-out panel can
+    //     no longer be re-docked;
+    //   • bootFollowerMode() / bootRemoteJoin() would build a second layout
+    //     in a follower or ?ss= viewer window.
+    //
+    // The flag lives on `window` precisely because it has to outlive the
+    // re-execution that resets everything else. Same shape as sectionmap's
+    // __slopsmithSectionMapHooksInstalled guard, applied at body level.
+    //
+    // Node test env: tests/screen.test.js builds a fresh `global.window` per
+    // case, so the flag is absent there and the body runs in full — including
+    // the module.exports block at the bottom, which the early return would
+    // otherwise skip.
+    const HOOK_KEY = '__feedBackSplitscreenHooksInstalled';
+    if (typeof window !== 'undefined') {
+        if (window[HOOK_KEY]) return;
+        window[HOOK_KEY] = true;
+    }
+
     const LAYOUTS = {
         'top-bottom':  { panels: 2, style: 'flex-col' },
         'left-right':  { panels: 2, style: 'flex-row' },
@@ -297,12 +333,12 @@ try {
             const resp = await fetch('/api/plugins');
             const all  = await resp.json();
             // Store metadata for all viz plugins; factory presence is checked at
-            // populateSelect() time (not at fetch time), so the window['slopsmithViz_*']
+            // populateSelect() time (not at fetch time), so the window['feedBackViz_*']
             // globals are evaluated when the dropdown is first built.
             vizPlugins = (all || []).filter(p => p?.type === 'visualization');
         } catch (_) {
             // /api/plugins unavailable — fall back to scanning window for any
-            // slopsmithViz_* factories that are already loaded so viz options
+            // feedBackViz_* factories that are already loaded so viz options
             // remain available even when the plugin registry can't be fetched.
             // Mark fetch as failed so populateSelect re-scans on every build,
             // preserving the "deferred plugin scripts are reflected" property
@@ -332,7 +368,7 @@ try {
 
     // Bounded poll for viz factories that register AFTER the picker is
     // first built. /api/plugins returns metadata for every type:visualization
-    // plugin immediately, but each plugin's window.slopsmithViz_<id> factory
+    // plugin immediately, but each plugin's window.feedBackViz_<id> factory
     // only exists after the host has loaded and executed that plugin's
     // screen.js. The host loads plugin scripts sequentially in loadPlugins()
     // (alphabetical by directory). Two cases leave the picker missing
@@ -661,7 +697,7 @@ try {
     // `key` is the localStorage suffix the viz plugin reads per-panel. For
     // highway_3d that's h3d_bg_panel<N>_<key>, falling back to the global
     // h3d_bg_<key> (see the plugin's _bgReadSetting). A viz plugin can override
-    // this list at runtime by exposing `window.slopsmithViz_highway_3d.panelControls`
+    // this list at runtime by exposing `window.feedBackViz_highway_3d.panelControls`
     // (same shape) — that takes precedence so the plugin owns the up-to-date
     // list without splitscreen needing edits when it adds options.
     // For `range`: min/max default to 0..1 and step to 0.05 when omitted.
@@ -693,7 +729,7 @@ try {
         // setters. The popover stays hidden for other viz plugins until the
         // descriptor carries per-plugin storage/setter info (or read/write fns).
         // A plugin can still customize *which* controls show via
-        // window.slopsmithViz_highway_3d.panelControls.
+        // window.feedBackViz_highway_3d.panelControls.
         if (pluginId !== 'highway_3d') return null;
         const fac = vizFactory(pluginId);
         // An array (even empty) is an intentional override — empty = opt out of
@@ -1797,8 +1833,9 @@ try {
     }
     // Close any open viz popover when clicking outside it / its trigger button.
     document.addEventListener('pointerdown', (e) => {
-        const t = e.target;
-        if (t && typeof t.closest === 'function' && (t.closest('.ss-viz-popover') || t.closest('[data-ss-viz-btn]'))) return;
+        const target = e.target;
+        if (target && typeof target.closest === 'function'
+            && (target.closest('.ss-viz-popover') || target.closest('[data-ss-viz-btn]'))) return;
         _closeAllVizPopovers();
     }, true);
 
@@ -1867,7 +1904,7 @@ try {
 
         // Any registered viz plugin whose factory hasn't loaded yet? Kick
         // off the bounded poll so the picker auto-repopulates once their
-        // script registers window.slopsmithViz_<id>. Single-flight — cheap
+        // script registers window.feedBackViz_<id>. Single-flight — cheap
         // to call on every populateSelect.
         if (vizPlugins.some(vp => !hasVizFactory(vp.id))) {
             _startVizFactoryWatch();
