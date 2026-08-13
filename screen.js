@@ -19,6 +19,29 @@ try {
      *  <audio> element.
      * ====================================================================== */
 
+    // ── Reload idempotency (plugin-runtime-idempotent.v1) ─────────────────
+    // The Host may re-execute screen.js on plugin reload, which re-runs this
+    // whole IIFE. Module state resetting is harmless — it gets rebuilt — but
+    // the hooks we install on shared globals are not module state and would
+    // accumulate: window.playSong would be wrapped a second time around the
+    // already-wrapped version (so every song load runs our wrapper twice),
+    // and the resize / beforeunload / pointerdown listeners would each fire
+    // twice per event.
+    //
+    // The flag lives on `window` precisely because it has to outlive the
+    // re-execution that resets everything else. On a second run we skip
+    // installing hooks and leave the first run's — which are still bound to
+    // a fully live set of closures — in place. Same shape as sectionmap's
+    // __slopsmithSectionMapHooksInstalled guard.
+    //
+    // Node test env: tests/screen.test.js builds a fresh `global.window` per
+    // case, so the flag is always absent there and hooks install every time,
+    // exactly as before.
+    const HOOK_KEY = '__feedBackSplitscreenHooksInstalled';
+    const _hooksAlreadyInstalled =
+        typeof window !== 'undefined' && window[HOOK_KEY] === true;
+    if (typeof window !== 'undefined') window[HOOK_KEY] = true;
+
     const LAYOUTS = {
         'top-bottom':  { panels: 2, style: 'flex-col' },
         'left-right':  { panels: 2, style: 'flex-row' },
@@ -1796,11 +1819,15 @@ try {
         for (const p of panels) if (p.vizPopover) p.vizPopover.style.display = 'none';
     }
     // Close any open viz popover when clicking outside it / its trigger button.
-    document.addEventListener('pointerdown', (e) => {
-        const t = e.target;
-        if (t && typeof t.closest === 'function' && (t.closest('.ss-viz-popover') || t.closest('[data-ss-viz-btn]'))) return;
-        _closeAllVizPopovers();
-    }, true);
+    // Guarded: a reload would otherwise leave two capture listeners closing
+    // popovers on every pointerdown (see HOOK_KEY at the top of the IIFE).
+    if (!_hooksAlreadyInstalled) {
+        document.addEventListener('pointerdown', (e) => {
+            const t = e.target;
+            if (t && typeof t.closest === 'function' && (t.closest('.ss-viz-popover') || t.closest('[data-ss-viz-btn]'))) return;
+            _closeAllVizPopovers();
+        }, true);
+    }
 
     /**
      * ── Mastery slider helpers ──
@@ -4482,15 +4509,17 @@ try {
     // reservation, sliding the wrap (and every panel's bar) under the
     // follower toolbar. Follower mode has its own resize handler in
     // bootFollowerMode that resizes panels without touching the wrap.
-    window.addEventListener('resize', () => {
-        if (active && !FOLLOWER) sizeCanvases();
-    });
+    if (!_hooksAlreadyInstalled) {
+        window.addEventListener('resize', () => {
+            if (active && !FOLLOWER) sizeCanvases();
+        });
+    }
 
     // Tell any popped-out panels the main window is going away so they stop
     // syncing (and stop their highway rAF loops) and show a notice instead of
     // freezing silently. Best-effort — beforeunload BroadcastChannel posts
     // aren't guaranteed to flush; the popup's own state stays the floor.
-    if (!FOLLOWER) {
+    if (!FOLLOWER && !_hooksAlreadyInstalled) {
         window.addEventListener('beforeunload', () => {
             try {
                 const c = _ssChannel();
@@ -4504,8 +4533,13 @@ try {
     }
 
     // ── Hook into playSong ──
+    // The wrapper is always built, but only installed on a first run — see
+    // HOOK_KEY at the top of the IIFE. Guarding the assignment rather than
+    // the definition keeps this readable: a second evaluation would
+    // otherwise wrap the already-wrapped playSong, running everything below
+    // twice per song load.
     const _play = window.playSong;
-    window.playSong = async function (f, a) {
+    const _ssPlaySong = async function (f, a) {
         // Mount the Split button (and its siblings) BEFORE awaiting the
         // upstream chain. Any upstream playSong wrapper that throws (e.g.
         // capo failing in its v3 insertBefore — seen in the wild on the
@@ -4593,10 +4627,15 @@ try {
     // away from the player, but if something tries we don't tear down split
     // (the follower panel IS the player).
     const _show = window.showScreen;
-    window.showScreen = function (id) {
+    const _ssShowScreen = function (id) {
         if (!FOLLOWER && id !== 'player' && active) stopSplitScreen();
         _show(id);
     };
+
+    if (!_hooksAlreadyInstalled) {
+        window.playSong = _ssPlaySong;
+        window.showScreen = _ssShowScreen;
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     //  Follower-mode bootstrap (popup window only)

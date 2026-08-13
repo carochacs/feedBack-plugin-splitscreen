@@ -355,3 +355,54 @@ test('_bestFitLayout picks the smallest layout with room, and caps at six', () =
     assert.equal(_bestFitLayout(6), 'six');
     assert.equal(_bestFitLayout(7), 'six'); // nothing bigger — caller must truncate
 });
+
+// ── Reload idempotency (plugin-runtime-idempotent.v1) ─────────────────────
+// The Host may re-execute screen.js on plugin reload. Module state resetting
+// is fine, but hooks installed on shared globals must not accumulate: before
+// the HOOK_KEY guard, a second evaluation wrapped the already-wrapped
+// playSong and added a second copy of every listener, so each song load ran
+// the wrapper twice and each resize/pointerdown fired twice.
+test('re-evaluating screen.js installs its global hooks exactly once', () => {
+    const counts = { resize: 0, beforeunload: 0, pointerdown: 0 };
+    const location = { search: '', host: 'localhost:8420', protocol: 'http:' };
+
+    // One shared window across both loads — that is what a reload looks like.
+    global.window = {
+        location,
+        addEventListener: (ev) => {
+            if (ev in counts) counts[ev]++;
+        },
+    };
+    global.document = {
+        getElementById: () => null,
+        addEventListener: (ev) => { if (ev in counts) counts[ev]++; },
+        body: { appendChild: () => {} },
+        createElement: () => ({
+            style: {}, classList: { add() {}, remove() {} },
+            addEventListener() {}, appendChild() {}, setAttribute() {},
+        }),
+        readyState: 'loading',
+    };
+    global.localStorage = makeLocalStorage();
+    global.location = location;
+
+    const originalPlaySong = async function original() {};
+    window.playSong = originalPlaySong;
+    window.showScreen = function original() {};
+
+    const file = path.join(__dirname, '..', 'screen.js');
+    const load = () => {
+        delete require.cache[require.resolve(file)];
+        require(file);
+    };
+
+    load();
+    assert.notEqual(window.playSong, originalPlaySong, 'first load should wrap playSong');
+    const afterFirst = { ...counts };
+    const wrappedOnce = window.playSong;
+
+    load();
+
+    assert.deepEqual(counts, afterFirst, 'second evaluation must not re-add listeners');
+    assert.equal(window.playSong, wrappedOnce, 'second evaluation must not re-wrap playSong');
+});
