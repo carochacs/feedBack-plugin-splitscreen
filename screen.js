@@ -1823,8 +1823,9 @@ try {
     // popovers on every pointerdown (see HOOK_KEY at the top of the IIFE).
     if (!_hooksAlreadyInstalled) {
         document.addEventListener('pointerdown', (e) => {
-            const t = e.target;
-            if (t && typeof t.closest === 'function' && (t.closest('.ss-viz-popover') || t.closest('[data-ss-viz-btn]'))) return;
+            const target = e.target;
+            if (target && typeof target.closest === 'function'
+                && (target.closest('.ss-viz-popover') || target.closest('[data-ss-viz-btn]'))) return;
             _closeAllVizPopovers();
         }, true);
     }

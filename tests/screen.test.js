@@ -15,24 +15,41 @@ function makeLocalStorage() {
     };
 }
 
-function freshPlugin({ search = '', protocol = 'http:' } = {}) {
-    const location = { search, host: 'localhost:8420', protocol };
-    global.window = { location, addEventListener: () => {} };
-    global.document = {
+// screen.js only needs these DOM entry points to exist while its IIFE
+// evaluates — no test asserts on rendering, so the bodies are deliberately
+// inert. One shared no-op keeps that intent in a single place.
+const noop = () => { /* inert DOM stub — see comment above */ };
+
+function makeDocumentStub(onAddEventListener = noop) {
+    return {
         getElementById: () => null,
-        addEventListener: () => {},
-        body: { appendChild: () => {} },
+        addEventListener: onAddEventListener,
+        body: { appendChild: noop },
         createElement: () => ({
-            style: {}, classList: { add() {}, remove() {} },
-            addEventListener() {}, appendChild() {}, setAttribute() {},
+            style: {},
+            classList: { add: noop, remove: noop },
+            addEventListener: noop,
+            appendChild: noop,
+            setAttribute: noop,
         }),
         readyState: 'loading',
     };
+}
+
+const PLUGIN_PATH = path.join(__dirname, '..', 'screen.js');
+
+function loadPlugin() {
+    delete require.cache[require.resolve(PLUGIN_PATH)];
+    return require(PLUGIN_PATH);
+}
+
+function freshPlugin({ search = '', protocol = 'http:' } = {}) {
+    const location = { search, host: 'localhost:8420', protocol };
+    global.window = { location, addEventListener: noop };
+    global.document = makeDocumentStub();
     global.localStorage = makeLocalStorage();
     global.location = location;
-    const file = path.join(__dirname, '..', 'screen.js');
-    delete require.cache[require.resolve(file)];
-    return require(file);
+    return loadPlugin();
 }
 
 test('getWsUrl decodes percent-encoded filenames and builds a ws:// URL', () => {
@@ -364,44 +381,27 @@ test('_bestFitLayout picks the smallest layout with room, and caps at six', () =
 // the wrapper twice and each resize/pointerdown fired twice.
 test('re-evaluating screen.js installs its global hooks exactly once', () => {
     const counts = { resize: 0, beforeunload: 0, pointerdown: 0 };
+    const tally = (ev) => { if (ev in counts) counts[ev] += 1; };
     const location = { search: '', host: 'localhost:8420', protocol: 'http:' };
 
-    // One shared window across both loads — that is what a reload looks like.
-    global.window = {
-        location,
-        addEventListener: (ev) => {
-            if (ev in counts) counts[ev]++;
-        },
-    };
-    global.document = {
-        getElementById: () => null,
-        addEventListener: (ev) => { if (ev in counts) counts[ev]++; },
-        body: { appendChild: () => {} },
-        createElement: () => ({
-            style: {}, classList: { add() {}, remove() {} },
-            addEventListener() {}, appendChild() {}, setAttribute() {},
-        }),
-        readyState: 'loading',
-    };
+    // Deliberately NOT freshPlugin(): it builds a new window per call, and a
+    // reload is precisely the case where one window survives two evaluations.
+    global.window = { location, addEventListener: tally };
+    global.document = makeDocumentStub(tally);
     global.localStorage = makeLocalStorage();
     global.location = location;
 
-    const originalPlaySong = async function original() {};
+    // Sentinels — only their identity matters, so the bodies stay empty.
+    const originalPlaySong = async function originalPlaySong() { /* sentinel */ };
     window.playSong = originalPlaySong;
-    window.showScreen = function original() {};
+    window.showScreen = function originalShowScreen() { /* sentinel */ };
 
-    const file = path.join(__dirname, '..', 'screen.js');
-    const load = () => {
-        delete require.cache[require.resolve(file)];
-        require(file);
-    };
-
-    load();
+    loadPlugin();
     assert.notEqual(window.playSong, originalPlaySong, 'first load should wrap playSong');
     const afterFirst = { ...counts };
     const wrappedOnce = window.playSong;
 
-    load();
+    loadPlugin();
 
     assert.deepEqual(counts, afterFirst, 'second evaluation must not re-add listeners');
     assert.equal(window.playSong, wrappedOnce, 'second evaluation must not re-wrap playSong');
