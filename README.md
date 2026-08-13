@@ -23,7 +23,7 @@ A plugin for [feedBack](https://github.com/got-feedback/feedBack) that shows 2â€
 
 ```bash
 cd /path/to/feedBack/plugins
-git clone https://github.com/get-flashbacks/feedBack-plugin-splitscreen.git splitscreen
+git clone https://github.com/got-feedBack/feedBack-plugin-splitscreen.git splitscreen
 docker compose restart
 ```
 

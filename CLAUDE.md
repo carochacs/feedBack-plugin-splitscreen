@@ -359,7 +359,17 @@ Follow the lyrics/jumping-tab pattern:
 
 ## Git and PR conventions
 
-- All work goes on feature branches off `main` in this repo (`get-flashbacks/feedBack-plugin-splitscreen`)
-- PRs target `get-flashbacks/feedBack-plugin-splitscreen`
-- Use `gh pr create --repo get-flashbacks/feedBack-plugin-splitscreen --base main --head <branch>` from inside the plugin directory
-- Always branch from `origin/main` — there is no separate upstream remote
+- **`got-feedBack/feedBack-plugin-splitscreen` is the canonical plugin repo.** This
+  checkout (`get-flashbacks/feedBack-plugin-splitscreen`) is a fork of it. Keep changes
+  portable: anything a user or the upstream project would read — the README's install
+  instructions, links to feedBack or sibling plugins — points at `got-feedBack`, not at
+  this fork. Redirecting those to the fork is what stops the plugin being useful to the
+  repo it came from.
+- Day-to-day work goes on feature branches off `main` in this fork, and PRs target this
+  fork: `gh pr create --repo get-flashbacks/feedBack-plugin-splitscreen --base main --head <branch>`
+  from inside the plugin directory.
+- A fix that isn't fork-specific is worth opening upstream against
+  `got-feedBack/feedBack-plugin-splitscreen` too — same idea as core's
+  "upstream PRs retire debt" rule.
+- Always branch from `origin/main`; there is no `upstream` remote configured here, so add
+  one explicitly if you're preparing an upstream PR.
