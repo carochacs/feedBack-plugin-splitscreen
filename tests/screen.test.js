@@ -374,11 +374,12 @@ test('_bestFitLayout picks the smallest layout with room, and caps at six', () =
 });
 
 // ── Reload idempotency (plugin-runtime-idempotent.v1) ─────────────────────
-// The Host may re-execute screen.js on plugin reload. Module state resetting
-// is fine, but hooks installed on shared globals must not accumulate: before
-// the HOOK_KEY guard, a second evaluation wrapped the already-wrapped
-// playSong and added a second copy of every listener, so each song load ran
-// the wrapper twice and each resize/pointerdown fired twice.
+// The Host may re-execute screen.js on plugin reload. A second evaluation
+// must not run ANY top-level statement with observable side effects: not
+// just the shared-global hooks (before the guard, playSong got wrapped
+// around the already-wrapped version and every listener was added twice),
+// but also the settings-sync wiring, the LAN-share resume, and the
+// follower boot — all of which would build state no live hook reads.
 test('re-evaluating screen.js installs its global hooks exactly once', () => {
     const counts = { resize: 0, beforeunload: 0, pointerdown: 0 };
     const tally = (ev) => { if (ev in counts) counts[ev] += 1; };
@@ -391,6 +392,17 @@ test('re-evaluating screen.js installs its global hooks exactly once', () => {
     global.localStorage = makeLocalStorage();
     global.location = location;
 
+    // The settings-sync block wires a change handler onto this control. A
+    // second evaluation re-wiring it is the subtler half of the bug: the new
+    // handler mutates state that run #1's live playSong wrapper never reads,
+    // so "Always Split" would silently stop working after a reload.
+    let settingsWirings = 0;
+    global.document.getElementById = (id) => (
+        id === 'splitscreen-default-layout'
+            ? { value: '', addEventListener: () => { settingsWirings += 1; } }
+            : null
+    );
+
     // Sentinels — only their identity matters, so the bodies stay empty.
     const originalPlaySong = async function originalPlaySong() { /* sentinel */ };
     window.playSong = originalPlaySong;
@@ -398,6 +410,7 @@ test('re-evaluating screen.js installs its global hooks exactly once', () => {
 
     loadPlugin();
     assert.notEqual(window.playSong, originalPlaySong, 'first load should wrap playSong');
+    assert.equal(settingsWirings, 1, 'first load should wire the settings control once');
     const afterFirst = { ...counts };
     const wrappedOnce = window.playSong;
 
@@ -405,4 +418,5 @@ test('re-evaluating screen.js installs its global hooks exactly once', () => {
 
     assert.deepEqual(counts, afterFirst, 'second evaluation must not re-add listeners');
     assert.equal(window.playSong, wrappedOnce, 'second evaluation must not re-wrap playSong');
+    assert.equal(settingsWirings, 1, 'second evaluation must not re-wire settings handlers');
 });
