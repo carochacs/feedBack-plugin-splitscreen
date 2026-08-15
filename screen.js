@@ -3171,7 +3171,7 @@ try {
         sp.set('detectVerifierOffsetMs', String(cfg.detectVerifierOffsetMs || 0));
         if (Number.isFinite(cfg.mastery)) sp.set('mastery', String(cfg.mastery));
 
-        const popup = window.open(url.toString(), popupId, 'popup,width=1280,height=420,noopener');
+        const popup = window.open(url.toString(), popupId, 'popup,width=1280,height=420');
         if (!popup) {
             _showMainToast('Pop-out blocked by the browser. Allow popups for this site and try again.');
             return;
