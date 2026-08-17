@@ -811,8 +811,30 @@ try {
     /**
      * Save Panel Prefs.
      */
+    let _savePanelPrefsTimer = null;
     function savePanelPrefs() {
+        // Cancel any pending debounced write (see savePanelPrefsDebounced) —
+        // this synchronous call is about to persist the current state, and a
+        // stale timer firing later (e.g. after teardownPanels() has already
+        // reset `panels` to []) would silently clobber it with an empty array.
+        if (_savePanelPrefsTimer) { clearTimeout(_savePanelPrefsTimer); _savePanelPrefsTimer = null; }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(panels.map(panelToPrefs)));
+    }
+
+    /**
+     * Save Panel Prefs, debounced. For handlers that can fire many times in
+     * quick succession (e.g. a range slider's `input` event while dragging) —
+     * coalesces them into a single JSON.stringify + localStorage.setItem
+     * ~300ms after the last call instead of one per tick. Any direct
+     * savePanelPrefs() call (including the one in stopSplitScreen's teardown
+     * path) supersedes and cancels a pending debounced write.
+     */
+    function savePanelPrefsDebounced() {
+        if (_savePanelPrefsTimer) clearTimeout(_savePanelPrefsTimer);
+        _savePanelPrefsTimer = setTimeout(() => {
+            _savePanelPrefsTimer = null;
+            savePanelPrefs();
+        }, 300);
     }
 
     /**
@@ -1585,14 +1607,26 @@ try {
         const topOffset = sm ? sm.offsetHeight : 0;
         wrap.style.top = topOffset + 'px';
         wrap.style.bottom = controlsH + 'px';
-        for (const p of panels) {
+        // Batch every panel's layout READS (getBoundingClientRect/offsetHeight)
+        // before any panel's canvas-size WRITEs. Doing read-write-read-write
+        // per panel in a single loop forces the browser to flush pending style
+        // changes and recompute layout on every iteration (layout thrashing) —
+        // worst with 3-6 panel layouts (tri/quad/five/six). Measuring all
+        // panels up front, then applying every write, costs one layout flush
+        // total instead of one per panel.
+        const measured = panels.map((p) => (
+            (!p.lyricsMode && !(p.jumpingTabMode && p.jumpingTabPane))
+                ? { rect: p.panelDiv.getBoundingClientRect(), barH: p.bar.style.display === 'none' ? 0 : (p.bar.offsetHeight || 28) }
+                : null
+        ));
+        panels.forEach((p, i) => {
             if (p.jumpingTabMode && p.jumpingTabPane) {
                 p.jumpingTabPane.resize();
             } else if (!p.lyricsMode) {
-                p.hw.resize();
+                p.hw.resize(measured[i]);
             }
             if (p.chordsOverlay) p.chordsOverlay.resize();
-        }
+        });
     }
 
     /**
@@ -1625,11 +1659,19 @@ try {
         panel.canvas = newCanvas;
 
         const hw = createHighway();
-        hw.resize = function () {
+        // `measured`: optional { rect, barH } precomputed by a caller that's
+        // resizing multiple panels in one pass (see sizeCanvases) — lets it
+        // batch every panel's getBoundingClientRect()/offsetHeight READS
+        // before any of these canvas-size WRITEs, instead of interleaving
+        // read-write-read-write per panel (each read after a prior panel's
+        // write forces a synchronous layout — classic layout thrashing).
+        // Falls back to self-measuring for every other caller (window
+        // resize, togglePanelBar, single-panel rebuilds, ...).
+        hw.resize = function (measured) {
             const c = panel.canvas;
             if (!c) return;
-            const rect = panel.panelDiv.getBoundingClientRect();
-            const barH = panel.bar.style.display === 'none' ? 0 : (panel.bar.offsetHeight || 28);
+            const rect = measured ? measured.rect : panel.panelDiv.getBoundingClientRect();
+            const barH = measured ? measured.barH : (panel.bar.style.display === 'none' ? 0 : (panel.bar.offsetHeight || 28));
             const w = rect.width;
             const h = Math.max(0, rect.height - barH);
             c.style.width = w + 'px';
@@ -2327,7 +2369,11 @@ try {
             const pct = parseInt(panel.masterySlider.value);
             panel.hw.setMastery(pct / 100);
             panel.masteryLabel.textContent = pct + '%';
-            savePanelPrefs();
+            // Debounced: `input` fires on every step while dragging, and a
+            // full panelPrefs JSON.stringify + localStorage.setItem on every
+            // one of those is wasted work — coalesce into one write shortly
+            // after the drag settles.
+            savePanelPrefsDebounced();
         };
 
         // Per-panel viz controls live in the "3D ⚙" popover, which owns its own
@@ -3436,11 +3482,14 @@ try {
 
             // Override resize BEFORE init — highway's default sizes to full window,
             // which clobbers all panels to overlap. Size to parent panel instead.
-            hw.resize = function () {
+            // `measured`: optional precomputed { rect, barH } — see the comment on
+            // the identical override in recreatePanelHighway() for why (batches
+            // sizeCanvases()'s reads ahead of every panel's writes).
+            hw.resize = function (measured) {
                 const c = panel.canvas;
                 if (!c) return;
-                const rect = panel.panelDiv.getBoundingClientRect();
-                const barH = panel.bar.style.display === 'none' ? 0 : (panel.bar.offsetHeight || 28);
+                const rect = measured ? measured.rect : panel.panelDiv.getBoundingClientRect();
+                const barH = measured ? measured.barH : (panel.bar.style.display === 'none' ? 0 : (panel.bar.offsetHeight || 28));
                 const w = rect.width;
                 const h = Math.max(0, rect.height - barH);
                 c.style.width = w + 'px';
@@ -4990,10 +5039,19 @@ try {
         // top/bottom are set once at build time and don't need to track
         // window chrome the way the main-window wrap does).
         window.addEventListener('resize', () => {
-            for (const p of panels) {
+            // Batch every panel's getBoundingClientRect()/offsetHeight reads
+            // before any panel's canvas-size writes — see sizeCanvases() for
+            // why interleaving them per panel forces a layout recalc on each
+            // iteration (only matters once multi-panel popups exist).
+            const measured = panels.map((p) => (
+                (!p.lyricsMode && !(p.jumpingTabMode && p.jumpingTabPane))
+                    ? { rect: p.panelDiv.getBoundingClientRect(), barH: p.bar.style.display === 'none' ? 0 : (p.bar.offsetHeight || 28) }
+                    : null
+            ));
+            panels.forEach((p, i) => {
                 if (p.jumpingTabMode && p.jumpingTabPane) p.jumpingTabPane.resize();
-                else if (!p.lyricsMode) p.hw.resize();
-            }
+                else if (!p.lyricsMode) p.hw.resize(measured[i]);
+            });
         });
 
         // Wait one frame so all plugin IIFEs that loaded before us have
@@ -5184,12 +5242,15 @@ try {
             const hw = createHighway();
             const panel = Object.assign({ hw, arrIndex: 0 }, parts);
 
-            // Same hw.resize override pattern startSplitScreen() uses.
-            hw.resize = function () {
+            // Same hw.resize override pattern startSplitScreen() uses. `measured`:
+            // optional precomputed { rect, barH } — see recreatePanelHighway()'s
+            // comment; used by the window-resize handler below to batch reads
+            // ahead of writes across every panel in a multi-panel popup.
+            hw.resize = function (measured) {
                 const c = panel.canvas;
                 if (!c) return;
-                const rect = panel.panelDiv.getBoundingClientRect();
-                const barH = panel.bar.style.display === 'none' ? 0 : (panel.bar.offsetHeight || 28);
+                const rect = measured ? measured.rect : panel.panelDiv.getBoundingClientRect();
+                const barH = measured ? measured.barH : (panel.bar.style.display === 'none' ? 0 : (panel.bar.offsetHeight || 28));
                 const w = rect.width;
                 const h = Math.max(0, rect.height - barH);
                 c.style.width = w + 'px';
