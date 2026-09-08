@@ -435,13 +435,26 @@ class FakeWebSocket {
         this.closed = false;
         this._listeners = {};
     }
-    send(data) { this.sent.push(data); }
+    send(data) {
+        // Real WebSockets throw InvalidStateError synchronously when
+        // readyState !== OPEN(1) — mirror that so tests can't assert a
+        // delivery that couldn't happen in a real browser.
+        if (this.readyState !== 1) {
+            throw new DOMException('WebSocket is not open', 'InvalidStateError');
+        }
+        this.sent.push(data);
+    }
     close() { this.closed = true; }
     addEventListener(type, cb, opts) {
         this._listeners[type] = { cb, opts };
     }
     fireOpen() {
+        this.readyState = 1; // mirror the real transition to OPEN
         const l = this._listeners.open;
+        if (l) l.cb();
+    }
+    fireError() {
+        const l = this._listeners.error;
         if (l) l.cb();
     }
 }
@@ -480,7 +493,13 @@ test('stopLanShare waits for a CONNECTING socket to open before sending share-en
     }
 });
 
-test('stopLanShare falls back to sending on the timeout if a CONNECTING socket never opens', () => {
+test('stopLanShare closes (but cannot deliver) a CONNECTING socket that never opens by the timeout', () => {
+    // A real WebSocket still at CONNECTING throws InvalidStateError on
+    // send() — the fallback's try/catch swallows that, so this path can
+    // only guarantee the socket gets closed, never that the goodbye is
+    // actually delivered. Assert the close-only outcome rather than
+    // message delivery (which FakeWebSocket.send() now also refuses to
+    // fake past readyState 1).
     const mod = freshPlugin();
     const ws = new FakeWebSocket(0); // CONNECTING, never opens
     mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws, retryTimer: null, backoffMs: 1000 });
@@ -494,23 +513,71 @@ test('stopLanShare falls back to sending on the timeout if a CONNECTING socket n
 
         timeoutCb();
 
-        assert.deepEqual(ws.sent.map((s) => JSON.parse(s)), [{ type: 'share-ended' }]);
+        assert.equal(ws.sent.length, 0, 'send() throws at CONNECTING — no message can have been delivered');
         assert.equal(ws.closed, true);
     } finally {
         global.setTimeout = originalSetTimeout;
     }
 });
 
-test('stopLanShare is a no-op send when there is no live socket (already closed/never connected)', () => {
+test('stopLanShare opens a temporary socket to deliver share-ended when there is no live socket at all', () => {
+    // ws:null means the relay connection had already dropped and Stop
+    // landed in the gap before the scheduled reconnect fired. Previously
+    // this was a silent no-op, abandoning every viewer with no terminal
+    // signal. Now it opens a short-lived socket of its own just to
+    // deliver the goodbye.
     const mod = freshPlugin();
-    mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: null, backoffMs: 1000 });
+    const opened = [];
+    const originalWebSocket = global.WebSocket;
+    global.WebSocket = function (url) {
+        const ws = new FakeWebSocket(0); // CONNECTING, like a real fresh socket
+        ws.url = url;
+        opened.push(ws);
+        return ws;
+    };
+    try {
+        mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: null, backoffMs: 1000 });
 
-    assert.doesNotThrow(() => mod.stopLanShare());
-    assert.equal(mod._getLanShareForTest(), null);
+        assert.doesNotThrow(() => mod.stopLanShare());
+        assert.equal(mod._getLanShareForTest(), null);
+        assert.equal(opened.length, 1, 'must open exactly one temporary socket');
+        assert.match(opened[0].url, /\/ws\/sync\/ABC123$/);
+
+        opened[0].fireOpen();
+
+        assert.deepEqual(opened[0].sent.map((s) => JSON.parse(s)), [{ type: 'share-ended' }]);
+        assert.equal(opened[0].closed, true);
+    } finally {
+        global.WebSocket = originalWebSocket;
+    }
+});
+
+test('stopLanShare tolerates no WebSocket support at all when there is no live socket', () => {
+    const mod = freshPlugin();
+    const originalWebSocket = global.WebSocket;
+    delete global.WebSocket;
+    try {
+        mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: null, backoffMs: 1000 });
+        assert.doesNotThrow(() => mod.stopLanShare());
+        assert.equal(mod._getLanShareForTest(), null);
+    } finally {
+        global.WebSocket = originalWebSocket;
+    }
 });
 
 test('stopLanShare clears a pending reconnect timer so it cannot fire after teardown', () => {
+    // ws:null also drives the temp-reconnect branch (see the tests above) —
+    // must stub global.WebSocket here too, or this runs against Node's real
+    // WebSocket, which internally uses the (here mocked) global clearTimeout
+    // for its own connection bookkeeping and pollutes `cleared` with an
+    // unrelated call before this assertion ever runs.
     const mod = freshPlugin();
+    const originalWebSocket = global.WebSocket;
+    global.WebSocket = function (url) {
+        const ws = new FakeWebSocket(0);
+        ws.url = url;
+        return ws;
+    };
     let cleared = null;
     const originalClearTimeout = global.clearTimeout;
     global.clearTimeout = (id) => { cleared = id; };
@@ -520,5 +587,6 @@ test('stopLanShare clears a pending reconnect timer so it cannot fire after tear
         assert.equal(cleared, 'sentinel-timer-id');
     } finally {
         global.clearTimeout = originalClearTimeout;
+        global.WebSocket = originalWebSocket;
     }
 });

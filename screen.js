@@ -3928,25 +3928,42 @@ try {
         // signal (see the class doc comment above). If the socket is
         // currently connecting, give it a short window to finish opening so
         // the goodbye can actually go out before closing either way.
-        const finish = () => { if (ws) { try { ws.close(); } catch (_) {} } };
+        const finish = (liveWs) => { if (liveWs) { try { liveWs.close(); } catch (_) {} } };
         if (ws && ws.readyState === 1) {
             try { ws.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
-            finish();
+            finish(ws);
         } else if (ws && ws.readyState === 0) {
             let sent = false;
             const trySend = () => {
                 if (sent) return;
                 sent = true;
                 try { ws.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
-                finish();
+                finish(ws);
             };
             ws.addEventListener('open', trySend, { once: true });
             setTimeout(trySend, 1500);
+        } else if (typeof WebSocket === 'function') {
+            // No live/connecting socket at all — the relay connection had
+            // already dropped and this Stop landed in the gap before the
+            // scheduled reconnect (retryTimer, just cleared above) fired.
+            // Open a short-lived connection of our own just long enough to
+            // deliver the goodbye, then close it — otherwise this exact
+            // case (explicitly called out as in-scope above) still
+            // silently abandons every viewer, same as before this fix.
+            let tempWs;
+            try { tempWs = new WebSocket(getSyncUrl(s.key)); } catch (_) { return; }
+            let sent = false;
+            const trySend = () => {
+                if (sent) return;
+                sent = true;
+                try { tempWs.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
+                finish(tempWs);
+            };
+            tempWs.addEventListener('open', trySend, { once: true });
+            tempWs.addEventListener('error', () => finish(tempWs), { once: true });
+            setTimeout(() => { if (!sent) finish(tempWs); }, 1500);
         }
-        // else: no live/connecting socket at all (already CLOSING/CLOSED,
-        // or never connected) — nothing to deliver the goodbye to; the
-        // reconnect guard above (_lanShare already null) is still what
-        // matters for correctness here.
+        // else (no WebSocket support at all): nothing to deliver to.
         try {
             localStorage.removeItem('splitscreenLanShareActive');
             localStorage.removeItem('splitscreenLanShareCfg');
