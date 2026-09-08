@@ -186,7 +186,7 @@ window.createMyVisualization = function ({ container }) {
 
     return {
         connect(filename, arrangementIndex) {
-            // filename may be percent-encoded — decode it before building the URL:
+            // filename arrives percent-encoded (same as core's own contract) — decode it before building the URL:
             const decoded = decodeURIComponent(filename);
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
             const url = `${proto}//${location.host}/ws/highway/${decoded}?arrangement=${arrangementIndex}`;
@@ -214,7 +214,7 @@ window.createMyVisualization = function ({ container }) {
 | Rule | Why |
 |------|-----|
 | **No shared mutable state** | Split screen may create 2–4 instances simultaneously. Each needs its own canvas, WebSocket, RAF handle, and state. If your plugin uses module-level variables, use a context-swap pattern (see Jumping Tab) or refactor to closures. |
-| **Decode the filename** | `currentFilename` may be percent-encoded. Call `decodeURIComponent(filename)` before building the WebSocket URL to avoid double-encoding slashes. |
+| **Decode the filename** | `currentFilename` always arrives percent-encoded (every caller — the grid, v3's `songs.js`, `player.start()` — encodes it before calling `playSong`). Call `decodeURIComponent(filename)` before building the WebSocket URL to avoid double-encoding slashes. |
 | **Sync to `<audio>` directly** | Read `document.getElementById('audio').currentTime` in your RAF loop. The `setTime()` call from split screen's time sync loop is for highway instances only. |
 | **Clean up completely in `destroy()`** | Cancel RAF, close WebSocket, remove any DOM nodes you added inside the container. Split screen removes the container div itself. |
 | **Handle `resize()` properly** | Called on layout changes and window resizes. Update your canvas backing store respecting `devicePixelRatio`. |
