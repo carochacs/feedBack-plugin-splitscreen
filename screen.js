@@ -3217,7 +3217,12 @@ try {
         sp.set('detectVerifierOffsetMs', String(cfg.detectVerifierOffsetMs || 0));
         if (Number.isFinite(cfg.mastery)) sp.set('mastery', String(cfg.mastery));
 
-        const popup = window.open(url.toString(), popupId, 'popup,width=1280,height=420');
+        // noopener: the popup would otherwise hold a live window.opener back to
+        // this window. Same-origin today (url is built from window.location.origin
+        // with locally-constructed params, never attacker-supplied), but noopener
+        // is what stops that from becoming a reverse-tabnabbing vector the moment
+        // this ever redirects through anything origin-controlled, and it's free.
+        const popup = window.open(url.toString(), popupId, 'popup,width=1280,height=420,noopener');
         if (!popup) {
             _showMainToast('Pop-out blocked by the browser. Allow popups for this site and try again.');
             return;
