@@ -3217,16 +3217,23 @@ try {
         sp.set('detectVerifierOffsetMs', String(cfg.detectVerifierOffsetMs || 0));
         if (Number.isFinite(cfg.mastery)) sp.set('mastery', String(cfg.mastery));
 
-        // noopener: the popup would otherwise hold a live window.opener back to
-        // this window. Same-origin today (url is built from window.location.origin
-        // with locally-constructed params, never attacker-supplied), but noopener
-        // is what stops that from becoming a reverse-tabnabbing vector the moment
-        // this ever redirects through anything origin-controlled, and it's free.
-        const popup = window.open(url.toString(), popupId, 'popup,width=1280,height=420,noopener');
+        const popup = window.open(url.toString(), popupId, 'popup,width=1280,height=420');
         if (!popup) {
             _showMainToast('Pop-out blocked by the browser. Allow popups for this site and try again.');
             return;
         }
+        // Sever popup.opener rather than passing 'noopener' in the features
+        // string: per spec, 'noopener' makes window.open() itself return null
+        // even on a successful open, which would break every downstream use
+        // of the handle below (popups.set, the broadcaster, the closed-popup
+        // reap via e.popup.closed). Setting popup.opener = null after the
+        // non-null check achieves the same defense-in-depth goal (no live
+        // opener back-reference) without discarding the WindowProxy the rest
+        // of this function depends on. Same-origin today (url is built from
+        // window.location.origin with locally-constructed params, never
+        // attacker-supplied), but this is what stops it from becoming a
+        // reverse-tabnabbing vector the moment that ever changes.
+        popup.opener = null;
         // Track the popup (incl. its window handle so the broadcaster can reap
         // it if it dies without firing beforeunload).
         popups.set(popupId, { popup, originalConfig: cfg });
