@@ -97,7 +97,7 @@ Each entry in `panels[]` is built with `Object.assign({ hw, arrIndex: 0 }, parts
   panelDiv,          // outer div.splitscreen-panel
   canvas,            // <canvas> for the highway
   bar,               // the mini control bar div (position:absolute, bottom:0)
-  barToggleBtn,      // blue ▾/▴ Bar button (position:absolute, bottom:0, right:0, z-index:6)
+  barToggleBtn,      // blue ▾/▴ Bar button (position:absolute, bottom:0, right:0, z-index:8)
   select,            // arrangement <select>
   arrName,           // <span> showing current arrangement name
   invertBtn,         // Invert toggle button
@@ -239,7 +239,7 @@ Two independent levels:
 - On next `startSplitScreen()`, reads `splitscreenControlsHidden` from localStorage and calls `toggleControlsVisibility()` if true
 
 **Per-panel mini bar** (`panel.bar`)
-- `barToggleBtn`: `position:absolute; bottom:0; right:0; z-index:6` — always on top of the bar
+- `barToggleBtn`: `position:absolute; bottom:0; right:0; z-index:8` — always on top of the bar
 - `togglePanelBar(panel)`: toggles `bar.style.display`, updates button text/style, calls `hw.resize()` or `jumpingTabPane.resize()`, calls `savePanelPrefs()`
 - State persisted in `barHidden` field of `splitscreenPanelPrefs`
 - Restored in `startSplitScreen()` by calling `togglePanelBar(panel)` if `panelPrefs.barHidden`
@@ -354,7 +354,7 @@ Follow the lyrics/jumping-tab pattern:
 - **`sizeCanvases()` uses `controls.offsetHeight`** — when the controls bar is hidden (`display:none`), `offsetHeight` returns 0 and `wrap.style.bottom` becomes `'0px'`, filling the full viewport. This is correct and intentional.
 - **The `onSongInfo: () => {}` empty callback is mandatory** — omitting it causes every panel's WebSocket `song_info` message to overwrite the main player's audio `src`, arrangement dropdown, and HUD.
 - **Plugin load order** — screen.js loads alphabetically. Plugins that wrap `playSong` before splitscreen (alphabetically earlier names) run closer to the original; later-loading plugins run first. This affects the `_onReady` hookup timing.
-- **`currentFilename` may be percent-encoded** — always `decodeURIComponent(currentFilename)` before building URLs in pane plugins. `getWsUrl()` handles this internally for highway connections.
+- **`currentFilename` is always the percent-encoded form** — never raw. The grid renders `data-play="<encodeURIComponent(localFilename)>"`, v3's `songs.js` calls `playSong(encodeURIComponent(localFilename))`, and `player.start()` normalizes any raw name to encoded before calling `playSong` — so `decodeURIComponent(currentFilename)` never sees an unencoded name or a stray literal `%` (a real filename containing `%` arrives already percent-encoded, same as any other reserved character). `getWsUrl()` decodes internally for highway connections with this invariant documented inline (mirrors core `highway.js`'s own unconditional decode); other call sites (e.g. `toggleTab`'s tabview fetch) decode inside a `try`/`catch` that already wraps the whole request, so a violation of the invariant fails safely instead of throwing uncaught.
 - **`rebuildLayout()` uses `captureCurrentPrefs()`** — this captures the live state of running panels. `savePanelPrefs()` also writes the same data to localStorage. They share the same object shape; `captureCurrentPrefs` just returns the array in memory instead of persisting it.
 
 ## Git and PR conventions
