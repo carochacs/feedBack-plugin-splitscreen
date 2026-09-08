@@ -3913,11 +3913,40 @@ try {
      */
     function stopLanShare() {
         if (!_lanShare) return;
-        _lanSend({ type: 'share-ended' });   // terminal for viewers — before teardown
         const s = _lanShare;
+        const ws = s.ws;
         _lanShare = null;                    // null first: onclose must not reconnect
         if (s.retryTimer) clearTimeout(s.retryTimer);
-        if (s.ws) { try { s.ws.close(); } catch (_) {} }
+        // Send the terminal share-ended message directly against the captured
+        // `ws`, not via _lanSend() — that reads the module-level _lanShare,
+        // which is already null above (must be, so onclose doesn't schedule
+        // a reconnect). _lanSend() also silently drops any message when the
+        // socket isn't OPEN (readyState 1); previously that dropped
+        // share-ended outright whenever Stop landed mid-reconnect (ws null,
+        // or a fresh WebSocket still CONNECTING) — every viewer was left
+        // hello-polling forever, since share-ended is their ONLY terminal
+        // signal (see the class doc comment above). If the socket is
+        // currently connecting, give it a short window to finish opening so
+        // the goodbye can actually go out before closing either way.
+        const finish = () => { if (ws) { try { ws.close(); } catch (_) {} } };
+        if (ws && ws.readyState === 1) {
+            try { ws.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
+            finish();
+        } else if (ws && ws.readyState === 0) {
+            let sent = false;
+            const trySend = () => {
+                if (sent) return;
+                sent = true;
+                try { ws.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
+                finish();
+            };
+            ws.addEventListener('open', trySend, { once: true });
+            setTimeout(trySend, 1500);
+        }
+        // else: no live/connecting socket at all (already CLOSING/CLOSED,
+        // or never connected) — nothing to deliver the goodbye to; the
+        // reconnect guard above (_lanShare already null) is still what
+        // matters for correctness here.
         try {
             localStorage.removeItem('splitscreenLanShareActive');
             localStorage.removeItem('splitscreenLanShareCfg');
@@ -5783,6 +5812,9 @@ try {
             buildShareUrl, makeRemoteFollowerCfg, ROOM_KEY_ALPHABET,
             LAYOUTS, applyLayoutStyle, _bestFitLayout,
             _setArrangementsForTest(next) { arrangements = next; },
+            stopLanShare,
+            _setLanShareForTest(next) { _lanShare = next; },
+            _getLanShareForTest() { return _lanShare; },
         };
     }
 })();

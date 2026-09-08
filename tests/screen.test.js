@@ -420,3 +420,105 @@ test('re-evaluating screen.js installs its global hooks exactly once', () => {
     assert.equal(window.playSong, wrappedOnce, 'second evaluation must not re-wrap playSong');
     assert.equal(settingsWirings, 1, 'second evaluation must not re-wire settings handlers');
 });
+
+// ── LAN share teardown (stopLanShare) ──────────────────────────────────────
+// stopLanShare() sends a terminal 'share-ended' message directly against the
+// captured WebSocket rather than via _lanSend() (which silently drops any
+// message whenever the socket isn't OPEN) — every viewer's only terminal
+// signal is share-ended, so dropping it on a Stop click that lands mid-
+// reconnect used to leave every viewer hello-polling forever.
+
+class FakeWebSocket {
+    constructor(readyState) {
+        this.readyState = readyState;
+        this.sent = [];
+        this.closed = false;
+        this._listeners = {};
+    }
+    send(data) { this.sent.push(data); }
+    close() { this.closed = true; }
+    addEventListener(type, cb, opts) {
+        this._listeners[type] = { cb, opts };
+    }
+    fireOpen() {
+        const l = this._listeners.open;
+        if (l) l.cb();
+    }
+}
+
+test('stopLanShare sends share-ended and closes immediately when the socket is OPEN', () => {
+    const mod = freshPlugin();
+    const ws = new FakeWebSocket(1); // OPEN
+    mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws, retryTimer: null, backoffMs: 1000 });
+
+    mod.stopLanShare();
+
+    assert.equal(mod._getLanShareForTest(), null, '_lanShare must be nulled synchronously');
+    assert.deepEqual(ws.sent.map((s) => JSON.parse(s)), [{ type: 'share-ended' }]);
+    assert.equal(ws.closed, true);
+});
+
+test('stopLanShare waits for a CONNECTING socket to open before sending share-ended', () => {
+    const mod = freshPlugin();
+    const ws = new FakeWebSocket(0); // CONNECTING
+    mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws, retryTimer: null, backoffMs: 1000 });
+
+    const originalSetTimeout = global.setTimeout;
+    global.setTimeout = () => 0; // never fire the 1500ms fallback in this test
+    try {
+        mod.stopLanShare();
+        assert.equal(mod._getLanShareForTest(), null, '_lanShare must be nulled synchronously');
+        assert.equal(ws.sent.length, 0, 'must not send before the socket actually opens');
+        assert.equal(ws.closed, false, 'must not close before the goodbye is sent');
+
+        ws.fireOpen();
+
+        assert.deepEqual(ws.sent.map((s) => JSON.parse(s)), [{ type: 'share-ended' }]);
+        assert.equal(ws.closed, true);
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
+});
+
+test('stopLanShare falls back to sending on the timeout if a CONNECTING socket never opens', () => {
+    const mod = freshPlugin();
+    const ws = new FakeWebSocket(0); // CONNECTING, never opens
+    mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws, retryTimer: null, backoffMs: 1000 });
+
+    const originalSetTimeout = global.setTimeout;
+    let timeoutCb = null;
+    global.setTimeout = (cb) => { timeoutCb = cb; return 0; };
+    try {
+        mod.stopLanShare();
+        assert.equal(ws.sent.length, 0);
+
+        timeoutCb();
+
+        assert.deepEqual(ws.sent.map((s) => JSON.parse(s)), [{ type: 'share-ended' }]);
+        assert.equal(ws.closed, true);
+    } finally {
+        global.setTimeout = originalSetTimeout;
+    }
+});
+
+test('stopLanShare is a no-op send when there is no live socket (already closed/never connected)', () => {
+    const mod = freshPlugin();
+    mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: null, backoffMs: 1000 });
+
+    assert.doesNotThrow(() => mod.stopLanShare());
+    assert.equal(mod._getLanShareForTest(), null);
+});
+
+test('stopLanShare clears a pending reconnect timer so it cannot fire after teardown', () => {
+    const mod = freshPlugin();
+    let cleared = null;
+    const originalClearTimeout = global.clearTimeout;
+    global.clearTimeout = (id) => { cleared = id; };
+    try {
+        mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: 'sentinel-timer-id', backoffMs: 1000 });
+        mod.stopLanShare();
+        assert.equal(cleared, 'sentinel-timer-id');
+    } finally {
+        global.clearTimeout = originalClearTimeout;
+    }
+});
