@@ -535,6 +535,11 @@ test('stopLanShare opens a temporary socket to deliver share-ended when there is
         opened.push(ws);
         return ws;
     };
+    // The code also schedules a real 1.5s fallback timeout alongside the
+    // 'open' listener; left unstubbed it still fires for real after this
+    // test's assertions complete, holding the runner open for no reason.
+    const originalSetTimeout = global.setTimeout;
+    global.setTimeout = () => 0;
     try {
         mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: null, backoffMs: 1000 });
 
@@ -547,6 +552,30 @@ test('stopLanShare opens a temporary socket to deliver share-ended when there is
 
         assert.deepEqual(opened[0].sent.map((s) => JSON.parse(s)), [{ type: 'share-ended' }]);
         assert.equal(opened[0].closed, true);
+    } finally {
+        global.WebSocket = originalWebSocket;
+        global.setTimeout = originalSetTimeout;
+    }
+});
+
+test('stopLanShare still clears the persisted share flags when the temp WebSocket constructor throws', () => {
+    // A throwing `new WebSocket(...)` (e.g. a malformed URL -> SyntaxError)
+    // must not skip the localStorage cleanup below it — otherwise
+    // _maybeResumeLanShare() re-arms a share on the next page load that the
+    // user explicitly stopped. Every other branch's cleanup is
+    // unconditional; this one must be too.
+    const mod = freshPlugin();
+    const originalWebSocket = global.WebSocket;
+    global.WebSocket = function () { throw new DOMException('bad url', 'SyntaxError'); };
+    try {
+        localStorage.setItem('splitscreenLanShareActive', 'true');
+        localStorage.setItem('splitscreenLanShareCfg', JSON.stringify({ some: 'cfg' }));
+        mod._setLanShareForTest({ key: 'ABC123', cfg: null, ws: null, retryTimer: null, backoffMs: 1000 });
+
+        assert.doesNotThrow(() => mod.stopLanShare());
+
+        assert.equal(localStorage.getItem('splitscreenLanShareActive'), null);
+        assert.equal(localStorage.getItem('splitscreenLanShareCfg'), null);
     } finally {
         global.WebSocket = originalWebSocket;
     }
@@ -578,6 +607,10 @@ test('stopLanShare clears a pending reconnect timer so it cannot fire after tear
         ws.url = url;
         return ws;
     };
+    // Same reasoning as the test above: stub away the real 1.5s fallback
+    // timer the temp-reconnect branch schedules, so this test stays instant.
+    const originalSetTimeout = global.setTimeout;
+    global.setTimeout = () => 0;
     let cleared = null;
     const originalClearTimeout = global.clearTimeout;
     global.clearTimeout = (id) => { cleared = id; };
@@ -588,5 +621,6 @@ test('stopLanShare clears a pending reconnect timer so it cannot fire after tear
     } finally {
         global.clearTimeout = originalClearTimeout;
         global.WebSocket = originalWebSocket;
+        global.setTimeout = originalSetTimeout;
     }
 });

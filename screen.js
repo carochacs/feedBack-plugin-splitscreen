@@ -3950,18 +3950,20 @@ try {
             // deliver the goodbye, then close it — otherwise this exact
             // case (explicitly called out as in-scope above) still
             // silently abandons every viewer, same as before this fix.
-            let tempWs;
-            try { tempWs = new WebSocket(getSyncUrl(s.key)); } catch (_) { return; }
-            let sent = false;
-            const trySend = () => {
-                if (sent) return;
-                sent = true;
-                try { tempWs.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
-                finish(tempWs);
-            };
-            tempWs.addEventListener('open', trySend, { once: true });
-            tempWs.addEventListener('error', () => finish(tempWs), { once: true });
-            setTimeout(() => { if (!sent) finish(tempWs); }, 1500);
+            let tempWs = null;
+            try { tempWs = new WebSocket(getSyncUrl(s.key)); } catch (_) { /* fall through to shared cleanup below */ }
+            if (tempWs) {
+                let sent = false;
+                const trySend = () => {
+                    if (sent) return;
+                    sent = true;
+                    try { tempWs.send(JSON.stringify({ type: 'share-ended' })); } catch (_) {}
+                    finish(tempWs);
+                };
+                tempWs.addEventListener('open', trySend, { once: true });
+                tempWs.addEventListener('error', () => finish(tempWs), { once: true });
+                setTimeout(() => { if (!sent) finish(tempWs); }, 1500);
+            }
         }
         // else (no WebSocket support at all): nothing to deliver to.
         try {
